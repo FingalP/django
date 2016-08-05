@@ -161,6 +161,7 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
                         can_add_related=related_modeladmin.has_add_permission(request),
                         can_change_related=related_modeladmin.has_change_permission(request),
                         can_delete_related=related_modeladmin.has_delete_permission(request),
+                        can_view_related=related_modeladmin.has_view_permission(request),
                     )
                 formfield.widget = widgets.RelatedFieldWidgetWrapper(
                     formfield.widget, db_field.remote_field, self.admin_site, **wrapper_kwargs
@@ -313,6 +314,22 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         """
         return self.readonly_fields
 
+    def get_uneditable_fields(self, request, obj=None):
+        """
+        Get fields that are either readonly or hasn't change/add permissions
+        """
+        if hasattr(request, 'user') and (
+                self.has_change_permission(request, obj) or (self.has_add_permission(request) and not obj)):
+            return self.get_readonly_fields(request, obj)
+        elif self.fieldsets:
+            return flatten_fieldsets(self.get_fieldsets(request, obj))
+
+        local_fields = [field.name for field in self.opts.local_fields]
+        local_many_to_many = [field.name for field in self.opts.local_many_to_many]
+        readonly_fields = list(self.get_readonly_fields(request, obj))
+        local_fields = [field.name for field in self.opts.local_fields]
+        return local_fields + local_many_to_many + readonly_fields
+
     def get_prepopulated_fields(self, request, obj=None):
         """
         Hook for specifying custom prepopulated fields.
@@ -455,6 +472,21 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         codename = get_permission_codename('change', opts)
         return request.user.has_perm("%s.%s" % (opts.app_label, codename))
 
+    def has_view_permission(self, request, obj=None):
+        """
+        Returns True if the given request has permission to view the given
+        Django model instance, the default implementation doesn't examine the
+        `obj` parameter.
+
+        Can be overridden by the user in subclasses. In such case it should
+        return True if the given request has permission to view the `obj`
+        model instance. If `obj` is None, this should return True if the given
+        request has permission to view *any* object of the given type.
+        """
+        opts = self.opts
+        codename = get_permission_codename('view', opts)
+        return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+
     def has_delete_permission(self, request, obj=None):
         """
         Return True if the given request has permission to change the given
@@ -536,6 +568,7 @@ class ModelAdmin(BaseModelAdmin):
             if request:
                 if not (inline.has_add_permission(request) or
                         inline.has_change_permission(request, obj) or
+                        inline.has_view_permission(request, obj) or
                         inline.has_delete_permission(request, obj)):
                     continue
                 if not inline.has_add_permission(request):
@@ -596,6 +629,7 @@ class ModelAdmin(BaseModelAdmin):
         return {
             'add': self.has_add_permission(request),
             'change': self.has_change_permission(request),
+            'view': self.has_view_permission(request),
             'delete': self.has_delete_permission(request),
         }
 
@@ -603,7 +637,7 @@ class ModelAdmin(BaseModelAdmin):
         if self.fields:
             return self.fields
         form = self.get_form(request, obj, fields=None)
-        return list(form.base_fields) + list(self.get_readonly_fields(request, obj))
+        return list(form.base_fields) + list(self.get_uneditable_fields(request, obj))
 
     def get_form(self, request, obj=None, **kwargs):
         """
@@ -616,8 +650,8 @@ class ModelAdmin(BaseModelAdmin):
             fields = flatten_fieldsets(self.get_fieldsets(request, obj))
         excluded = self.get_exclude(request, obj)
         exclude = [] if excluded is None else list(excluded)
-        readonly_fields = self.get_readonly_fields(request, obj)
-        exclude.extend(readonly_fields)
+        uneditable_fields = self.get_uneditable_fields(request, obj)
+        exclude.extend(uneditable_fields)
         if excluded is None and hasattr(self.form, '_meta') and self.form._meta.exclude:
             # Take the custom ModelForm's Meta.exclude into account only if the
             # ModelAdmin doesn't define its own.
@@ -626,9 +660,9 @@ class ModelAdmin(BaseModelAdmin):
         # default on modelform_factory
         exclude = exclude or None
 
-        # Remove declared form fields which are in readonly_fields.
+        # Remove declared form fields which are in uneditable_fields.
         new_attrs = OrderedDict(
-            (f, None) for f in readonly_fields
+            (f, None) for f in uneditable_fields
             if f in self.form.declared_fields
         )
         form = type(self.form.__name__, (self.form,), new_attrs)
@@ -774,6 +808,10 @@ class ModelAdmin(BaseModelAdmin):
         # If self.actions is explicitly set to None that means that we don't
         # want *any* actions enabled on this page.
         if self.actions is None or IS_POPUP_VAR in request.GET:
+            return OrderedDict()
+
+        # Also user has to have change permisson
+        if not self.has_change_permission(request, None):
             return OrderedDict()
 
         actions = []
@@ -1009,12 +1047,21 @@ class ModelAdmin(BaseModelAdmin):
         preserved_filters = self.get_preserved_filters(request)
         form_url = add_preserved_filters({'preserved_filters': preserved_filters, 'opts': opts}, form_url)
         view_on_site_url = self.get_view_on_site_url(obj)
+
+        has_editable_inline_admin_formsets = False
+        for inline in context['inline_admin_formsets']:
+            if inline.has_add_permission or inline.has_change_permission or inline.has_delete_permission:
+                has_editable_inline_admin_formsets = True
+                break
+
         context.update({
             'add': add,
             'change': change,
             'has_add_permission': self.has_add_permission(request),
             'has_change_permission': self.has_change_permission(request, obj),
+            'has_view_permission': self.has_view_permission(request, obj),
             'has_delete_permission': self.has_delete_permission(request, obj),
+            'has_editable_inline_admin_formsets': has_editable_inline_admin_formsets,
             'has_file_field': True,  # FIXME - this should check if form or formsets have a FileField,
             'has_absolute_url': view_on_site_url is not None,
             'absolute_url': view_on_site_url,
@@ -1365,9 +1412,14 @@ class ModelAdmin(BaseModelAdmin):
         for inline, formset in zip(inline_instances, formsets):
             fieldsets = list(inline.get_fieldsets(request, obj))
             readonly = list(inline.get_readonly_fields(request, obj))
+            uneditable = list(inline.get_uneditable_fields(request, obj))
+            has_add_permission = inline.has_add_permission(request)
+            has_change_permission = inline.has_change_permission(request)
+            has_delete_permission = inline.has_delete_permission(request)
             prepopulated = dict(inline.get_prepopulated_fields(request, obj))
             inline_admin_formset = helpers.InlineAdminFormSet(
                 inline, formset, fieldsets, prepopulated, readonly,
+                uneditable, has_add_permission, has_change_permission, has_delete_permission,
                 model_admin=self,
             )
             inline_admin_formsets.append(inline_admin_formset)
@@ -1427,7 +1479,7 @@ class ModelAdmin(BaseModelAdmin):
         else:
             obj = self.get_object(request, unquote(object_id), to_field)
 
-            if not self.has_change_permission(request, obj):
+            if not self.has_view_permission(request, obj) and not self.has_change_permission(request, obj):
                 raise PermissionDenied
 
             if obj is None:
@@ -1468,7 +1520,7 @@ class ModelAdmin(BaseModelAdmin):
             form,
             list(self.get_fieldsets(request, obj)),
             self.get_prepopulated_fields(request, obj),
-            self.get_readonly_fields(request, obj),
+            self.get_uneditable_fields(request, obj),
             model_admin=self)
         media = self.media + adminForm.media
 
@@ -1517,7 +1569,7 @@ class ModelAdmin(BaseModelAdmin):
         from django.contrib.admin.views.main import ERROR_FLAG
         opts = self.model._meta
         app_label = opts.app_label
-        if not self.has_change_permission(request, None):
+        if not self.has_view_permission(request, None) and not self.has_change_permission(request, None):
             raise PermissionDenied
 
         list_display = self.get_list_display(request)
@@ -1563,6 +1615,8 @@ class ModelAdmin(BaseModelAdmin):
         # Actions with no confirmation
         if (actions and request.method == 'POST' and
                 'index' in request.POST and '_save' not in request.POST):
+            if not self.has_change_permission(request, None):
+                raise PermissionDenied
             if selected:
                 response = self.response_action(request, queryset=cl.get_queryset(request))
                 if response:
@@ -1579,6 +1633,8 @@ class ModelAdmin(BaseModelAdmin):
         if (actions and request.method == 'POST' and
                 helpers.ACTION_CHECKBOX_NAME in request.POST and
                 'index' not in request.POST and '_save' not in request.POST):
+            if not self.has_change_permission(request, None):
+                raise PermissionDenied
             if selected:
                 response = self.response_action(request, queryset=cl.get_queryset(request))
                 if response:
@@ -1599,6 +1655,8 @@ class ModelAdmin(BaseModelAdmin):
 
         # Handle POSTed bulk-edit data.
         if request.method == 'POST' and cl.list_editable and '_save' in request.POST:
+            if not self.has_change_permission(request, None):
+                raise PermissionDenied
             FormSet = self.get_changelist_formset(request)
             formset = cl.formset = FormSet(request.POST, request.FILES, queryset=self.get_queryset(request))
             if formset.is_valid():
@@ -1626,7 +1684,7 @@ class ModelAdmin(BaseModelAdmin):
                 return HttpResponseRedirect(request.get_full_path())
 
         # Handle GET -- construct a formset for display.
-        elif cl.list_editable:
+        elif cl.list_editable and self.has_change_permission(request):
             FormSet = self.get_changelist_formset(request)
             formset = cl.formset = FormSet(queryset=cl.result_list)
 
@@ -1754,7 +1812,7 @@ class ModelAdmin(BaseModelAdmin):
         if obj is None:
             return self._get_obj_does_not_exist_redirect(request, model._meta, object_id)
 
-        if not self.has_change_permission(request, obj):
+        if not self.has_view_permission(request, obj) and not self.has_change_permission(request, obj):
             raise PermissionDenied
 
         # Then get the history for this object.
@@ -1902,43 +1960,64 @@ class InlineModelAdmin(BaseModelAdmin):
         defaults.update(kwargs)
         base_model_form = defaults['form']
 
-        class DeleteProtectedModelForm(base_model_form):
-            def hand_clean_DELETE(self):
-                """
-                We don't validate the 'DELETE' field itself because on
-                templates it's not rendered using the field information, but
-                just using a generic "deletion_field" of the InlineModelAdmin.
-                """
-                if self.cleaned_data.get(DELETION_FIELD_NAME, False):
-                    using = router.db_for_write(self._meta.model)
-                    collector = NestedObjects(using=using)
-                    if self.instance.pk is None:
-                        return
-                    collector.collect([self.instance])
-                    if collector.protected:
-                        objs = []
-                        for p in collector.protected:
-                            objs.append(
-                                # Translators: Model verbose name and instance representation,
-                                # suitable to be an item in a list.
-                                _('%(class_name)s %(instance)s') % {
-                                    'class_name': p._meta.verbose_name,
-                                    'instance': p}
-                            )
-                        params = {'class_name': self._meta.model._meta.verbose_name,
-                                  'instance': self.instance,
-                                  'related_objects': get_text_list(objs, _('and'))}
-                        msg = _("Deleting %(class_name)s %(instance)s would require "
-                                "deleting the following protected related objects: "
-                                "%(related_objects)s")
-                        raise ValidationError(msg, code='deleting_protected', params=params)
+        def get_model_form(can_add=True, can_change=True):
+            """
+            This wraps DeleteProtectedModelForm to pass can_add and can_change to
+            the constructor. It's a bit dirty but I don't know how to clean it
+            easily...
+            """
+            class DeleteProtectedModelForm(base_model_form):
+                def __init__(self, *args, **kwargs):
+                    super(DeleteProtectedModelForm, self).__init__(*args, **kwargs)
+                    if not can_change and not self.instance._state.adding:
+                        self.fields = {}
+                    if not can_add and self.instance._state.adding:
+                        self.fields = {}
 
-            def is_valid(self):
-                result = super().is_valid()
-                self.hand_clean_DELETE()
-                return result
+                def hand_clean_DELETE(self):
+                    """
+                    We don't validate the 'DELETE' field itself because on
+                    templates it's not rendered using the field information, but
+                    just using a generic "deletion_field" of the InlineModelAdmin.
+                    """
+                    if self.cleaned_data.get(DELETION_FIELD_NAME, False):
+                        using = router.db_for_write(self._meta.model)
+                        collector = NestedObjects(using=using)
+                        if self.instance._state.adding:
+                            return
+                        collector.collect([self.instance])
+                        if collector.protected:
+                            objs = []
+                            for p in collector.protected:
+                                objs.append(
+                                    # Translators: Model verbose name and instance representation,
+                                    # suitable to be an item in a list.
+                                    _('%(class_name)s %(instance)s') % {
+                                        'class_name': p._meta.verbose_name,
+                                        'instance': p}
+                                )
+                            params = {'class_name': self._meta.model._meta.verbose_name,
+                                      'instance': self.instance,
+                                      'related_objects': get_text_list(objs, _('and'))}
+                            msg = _("Deleting %(class_name)s %(instance)s would require "
+                                    "deleting the following protected related objects: "
+                                    "%(related_objects)s")
+                            raise ValidationError(msg, code='deleting_protected', params=params)
 
-        defaults['form'] = DeleteProtectedModelForm
+                def is_valid(self):
+                    result = super().is_valid()
+                    self.hand_clean_DELETE()
+                    return result
+
+            return DeleteProtectedModelForm
+
+        can_change = True
+        can_add = True
+        if request:
+            can_change = self.has_change_permission(request, obj)
+            can_add = self.has_add_permission(request)
+
+        defaults['form'] = get_model_form(can_add, can_change)
 
         if defaults['fields'] is None and not modelform_defines_fields(defaults['form']):
             defaults['fields'] = forms.ALL_FIELDS
@@ -1953,7 +2032,7 @@ class InlineModelAdmin(BaseModelAdmin):
 
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
-        if not self.has_change_permission(request):
+        if not (self.has_change_permission(request) or self.has_view_permission(request)):
             queryset = queryset.none()
         return queryset
 
@@ -1977,6 +2056,15 @@ class InlineModelAdmin(BaseModelAdmin):
                     break
         codename = get_permission_codename('change', opts)
         return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+
+    def has_view_permission(self, request, obj=None):
+        if self.opts.auto_created:
+            # We're checking the rights to an auto-created intermediate model,
+            # which doesn't have its own individual permissions. The user needs
+            # to have the view permission for the related model in order to
+            # be able to do anything with the intermediate model.
+            return self.has_change_permission(request, obj)
+        return super(InlineModelAdmin, self).has_view_permission(request, obj)
 
     def has_delete_permission(self, request, obj=None):
         if self.opts.auto_created:

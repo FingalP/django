@@ -1333,6 +1333,7 @@ class AdminViewPermissionsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.superuser = User.objects.create_superuser(username='super', password='secret', email='super@example.com')
+        cls.viewuser = User.objects.create_user(username='viewuser', password='secret', is_staff=True)
         cls.adduser = User.objects.create_user(username='adduser', password='secret', is_staff=True)
         cls.changeuser = User.objects.create_user(username='changeuser', password='secret', is_staff=True)
         cls.deleteuser = User.objects.create_user(username='deleteuser', password='secret', is_staff=True)
@@ -1363,6 +1364,10 @@ class AdminViewPermissionsTest(TestCase):
         # User who can delete Articles
         cls.deleteuser.user_permissions.add(get_perm(Article, get_permission_codename('delete', opts)))
         cls.deleteuser.user_permissions.add(get_perm(Section, get_permission_codename('delete', Section._meta)))
+
+        # User who can view Articles
+        cls.viewuser.user_permissions.add(get_perm(Article, get_permission_codename('view', opts)))
+        cls.viewuser.user_permissions.add(get_perm(Section, get_permission_codename('view', Section._meta)))
 
         # login POST dicts
         cls.index_url = reverse('admin:index')
@@ -1404,6 +1409,11 @@ class AdminViewPermissionsTest(TestCase):
         cls.joepublic_login = {
             REDIRECT_FIELD_NAME: cls.index_url,
             'username': 'joepublic',
+            'password': 'secret',
+        }
+        cls.viewuser_login = {
+            REDIRECT_FIELD_NAME: cls.index_url,
+            'username': 'viewuser',
             'password': 'secret',
         }
         cls.no_username_login = {
@@ -1479,6 +1489,24 @@ class AdminViewPermissionsTest(TestCase):
         login = self.client.post(login_url, self.no_username_login)
         self.assertEqual(login.status_code, 200)
         self.assertFormError(login, 'form', 'username', ['This field is required.'])
+
+    def test_login_view_user(self):
+        """
+        Make sure that staff members with only view permission can log in.
+
+        Successful posts to the login page will redirect to the original url.
+        Unsuccessful attempts will continue to render the login page with
+        a 200 status code.
+        """
+        login_url = '%s?next=%s' % (reverse('admin:login'), reverse('admin:index'))
+
+        # View User
+        response = self.client.get(self.index_url)
+        self.assertEqual(response.status_code, 302)
+        login = self.client.post(login_url, self.viewuser_login)
+        self.assertRedirects(login, self.index_url)
+        self.assertFalse(login.context)
+        self.client.get(reverse('admin:logout'))
 
     def test_login_redirect_for_direct_get(self):
         """
@@ -1661,6 +1689,18 @@ class AdminViewPermissionsTest(TestCase):
         self.assertEqual(post.status_code, 403)
         self.client.get(reverse('admin:logout'))
 
+        # view user should be able to view the article but not change any of them
+        # (the POST can be sent, but no modification occures)
+        self.client.force_login(self.viewuser)
+        response = self.client.get(article_changelist_url)
+        self.assertEqual(response.status_code, 200)
+        response = self.client.get(article_change_url)
+        self.assertEqual(response.status_code, 200)
+        post = self.client.post(article_change_url, change_dict)
+        self.assertEqual(post.status_code, 302)
+        self.assertEqual(Article.objects.get(pk=self.a1.pk).content, '<p>Middle content</p>')
+        self.client.get(reverse('admin:logout'))
+
         # change user can view all items and edit them
         self.client.force_login(self.changeuser)
         response = self.client.get(article_changelist_url)
@@ -1690,9 +1730,18 @@ class AdminViewPermissionsTest(TestCase):
         # Test redirection when using row-level change permissions. Refs #11513.
         r1 = RowLevelChangePermissionModel.objects.create(id=1, name="odd id")
         r2 = RowLevelChangePermissionModel.objects.create(id=2, name="even id")
+        r3 = RowLevelChangePermissionModel.objects.create(id=3, name="odd id mult 3")
+        r6 = RowLevelChangePermissionModel.objects.create(id=6, name="even id mult 3")
         change_url_1 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r1.pk,))
         change_url_2 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r2.pk,))
-        for login_user in [self.superuser, self.adduser, self.changeuser, self.deleteuser]:
+        change_url_3 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r3.pk,))
+        change_url_6 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r6.pk,))
+        logins = [self.superuser,
+                  self.viewuser,
+                  self.changeuser,
+                  self.adduser,
+                  self.deleteuser]
+        for login_user in logins:
             self.client.force_login(login_user)
             response = self.client.get(change_url_1)
             self.assertEqual(response.status_code, 403)
@@ -1704,6 +1753,18 @@ class AdminViewPermissionsTest(TestCase):
             response = self.client.post(change_url_2, {'name': 'changed'})
             self.assertEqual(RowLevelChangePermissionModel.objects.get(id=2).name, 'changed')
             self.assertRedirects(response, self.index_url)
+            response = self.client.get(change_url_3)
+            self.assertEqual(response.status_code, 200)
+            response = self.client.post(change_url_3, {'name': 'changed'})
+            self.assertEqual(response.status_code, 302)
+            self.assertRedirects(response, self.index_url)
+            self.assertEqual(RowLevelChangePermissionModel.objects.get(id=3).name, 'odd id mult 3')
+            response = self.client.get(change_url_6)
+            self.assertEqual(response.status_code, 200)
+            response = self.client.post(change_url_6, {'name': 'changed'})
+            self.assertEqual(RowLevelChangePermissionModel.objects.get(id=6).name, 'changed')
+            self.assertRedirects(response, self.index_url)
+
             self.client.get(reverse('admin:logout'))
 
         for login_user in [self.joepublicuser, self.nostaffuser]:
@@ -1820,7 +1881,13 @@ class AdminViewPermissionsTest(TestCase):
         # Test redirection when using row-level change permissions. Refs #11513.
         rl1 = RowLevelChangePermissionModel.objects.create(name="odd id")
         rl2 = RowLevelChangePermissionModel.objects.create(name="even id")
-        for login_user in [self.superuser, self.adduser, self.changeuser, self.deleteuser]:
+
+        logins = [self.superuser,
+                  self.viewuser,
+                  self.changeuser,
+                  self.adduser,
+                  self.deleteuser]
+        for login_user in logins:
             self.client.force_login(login_user)
             url = reverse('admin:admin_views_rowlevelchangepermissionmodel_history', args=(rl1.pk,))
             response = self.client.get(url)
@@ -1842,6 +1909,20 @@ class AdminViewPermissionsTest(TestCase):
             self.assertContains(response, 'login-form')
 
             self.client.get(reverse('admin:logout'))
+
+    def test_history_view_with_view_permission(self):
+        """
+        History view should restrict access for user with view permissions.
+
+        The user should be able to view the list of article but not change any of them.
+        """
+        login_url = '%s?next=%s' % (reverse('admin:login'), reverse('admin:index'))
+
+        self.client.get(self.index_url)
+        self.client.post(login_url, self.viewuser_login)
+        response = self.client.get(reverse('admin:admin_views_article_history', args=(self.a1.pk,)))
+        self.assertEqual(response.status_code, 200)
+        self.client.get(reverse('admin:logout'))
 
     def test_history_view_bad_url(self):
         self.client.force_login(self.changeuser)
@@ -2011,6 +2092,17 @@ class AdminViewPermissionsTest(TestCase):
         self.assertContains(response, 'admin_views')
         self.assertContains(response, 'Articles')
 
+    def test_has_module_view_permission(self):
+        """
+        Ensure that has_module_permission() returns True for all users who
+        have view permission for that module, so that
+        the module is displayed on the admin index page.
+        """
+        self.client.login(**self.viewuser_login)
+        response = self.client.get(self.index_url)
+        self.assertContains(response, 'admin_views')
+        self.assertContains(response, 'Articles')
+
     def test_overriding_has_module_permission(self):
         """
         If has_module_permission() always returns False, the module shouldn't
@@ -2048,6 +2140,20 @@ class AdminViewPermissionsTest(TestCase):
         response = self.client.get(reverse('admin7:app_list', args=('admin_views',)))
         self.assertContains(response, sections)
         self.assertNotContains(response, articles)
+
+    def test_overriding_has_module_view_permission(self):
+        """
+        Ensure that overriding has_module_permission() has the desired effect.
+        In this case, it always returns False, so the module should not be
+        displayed on the admin index page for any users.
+        """
+        index_url = reverse('admin7:index')
+
+        self.client.login(**self.viewuser_login)
+        response = self.client.get(index_url)
+        self.assertContains(response, 'admin_views')
+        self.assertNotContains(response, 'Articles')
+        self.client.logout()
 
     def test_post_save_message_no_forbidden_links_visible(self):
         """
@@ -3888,7 +3994,17 @@ class AdminInlineTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.superuser = User.objects.create_superuser(username='super', password='secret', email='super@example.com')
+        cls.superuser = User.objects.create_superuser(
+            username='super', password='secret', email='super@example.com'
+        )
+
+        cls.permissionuser = User.objects.create_user(
+            username='permissionuser', password='secret', email='vuser@example.com', is_staff=True
+        )
+
+        # User who can view Articles
+        cls.permissionuser.user_permissions.add(get_perm(Collector, get_permission_codename('view', Collector._meta)))
+        cls.permissionuser.user_permissions.add(get_perm(Widget, get_permission_codename('view', Widget._meta)))
 
     def setUp(self):
         self.post_data = {
@@ -4005,6 +4121,63 @@ class AdminInlineTests(TestCase):
         self.assertEqual(Widget.objects.all()[0].name, "Widget 1")
 
         # Now modify that inline
+        self.post_data['widget_set-INITIAL_FORMS'] = "1"
+        self.post_data['widget_set-0-id'] = str(widget_id)
+        self.post_data['widget_set-0-name'] = "Widget 1 Updated"
+        response = self.client.post(collector_url, self.post_data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Widget.objects.count(), 1)
+        self.assertEqual(Widget.objects.all()[0].name, "Widget 1 Updated")
+
+    def test_simple_inline_permissions(self):
+        "A simple model doesn't perform changes without change permissions for related object"
+        result = self.client.login(username='permissionuser', password='secret')
+        self.assertEqual(result, True)
+
+        # Without add permission, we can't add a new inline
+        self.post_data['widget_set-0-name'] = "Widget 1"
+        collector_url = reverse('admin:admin_views_collector_change', args=(self.collector.pk,))
+        response = self.client.post(collector_url, self.post_data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Widget.objects.count(), 0)
+
+        # But after getting the permisson, we can
+        self.permissionuser.user_permissions.add(get_perm(Widget, get_permission_codename('add', Widget._meta)))
+
+        self.post_data['widget_set-0-name'] = "Widget 1"
+        collector_url = reverse('admin:admin_views_collector_change', args=(self.collector.pk,))
+        response = self.client.post(collector_url, self.post_data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Widget.objects.count(), 1)
+        self.assertEqual(Widget.objects.all()[0].name, "Widget 1")
+        widget_id = Widget.objects.all()[0].id
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get(collector_url)
+        self.assertContains(response, 'name="widget_set-0-id"')
+
+        # Now resave that inline
+        self.post_data['widget_set-INITIAL_FORMS'] = "1"
+        self.post_data['widget_set-0-id'] = str(widget_id)
+        self.post_data['widget_set-0-name'] = "Widget 1"
+        response = self.client.post(collector_url, self.post_data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Widget.objects.count(), 1)
+        self.assertEqual(Widget.objects.all()[0].name, "Widget 1")
+
+        # Without change permissions we can send POST data, but nothing changes
+        self.post_data['widget_set-INITIAL_FORMS'] = "1"
+        self.post_data['widget_set-0-id'] = str(widget_id)
+        self.post_data['widget_set-0-name'] = "Widget 1 Updated"
+        response = self.client.post(collector_url, self.post_data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Widget.objects.count(), 1)
+        self.assertEqual(Widget.objects.all()[0].name, "Widget 1")
+
+        # If we get the permissions, everything goes OK
+        self.permissionuser.user_permissions.remove(get_perm(Widget, get_permission_codename('add', Widget._meta)))
+        self.permissionuser.user_permissions.add(get_perm(Widget, get_permission_codename('change', Widget._meta)))
+
         self.post_data['widget_set-INITIAL_FORMS'] = "1"
         self.post_data['widget_set-0-id'] = str(widget_id)
         self.post_data['widget_set-0-name'] = "Widget 1 Updated"

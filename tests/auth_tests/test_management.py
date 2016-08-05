@@ -605,7 +605,7 @@ class CreatePermissionsTests(TestCase):
         # add/change/delete permission by default + custom permission
         self.assertEqual(Permission.objects.filter(
             content_type=permission_content_type,
-        ).count(), 4)
+        ).count(), 5)
 
         Permission.objects.filter(content_type=permission_content_type).delete()
         Permission._meta.default_permissions = []

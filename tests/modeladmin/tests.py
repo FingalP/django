@@ -630,6 +630,12 @@ class ModelAdminPermissionTests(SimpleTestCase):
                 return True
             return False
 
+    class MockViewUser(MockUser):
+        def has_perm(self, perm):
+            if perm == "modeladmin.view_band":
+                return True
+            return False
+
     class MockChangeUser(MockUser):
         def has_perm(self, perm):
             if perm == "modeladmin.change_band":
@@ -642,6 +648,22 @@ class ModelAdminPermissionTests(SimpleTestCase):
                 return True
             return False
 
+    def test_has_view_permission(self):
+        """
+        Ensure that has_view_permission returns True for users who can add
+        objects and False for users who can't.
+        """
+        ma = ModelAdmin(Band, AdminSite())
+        request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertTrue(ma.has_view_permission(request))
+        request.user = self.MockAddUser()
+        self.assertFalse(ma.has_view_permission(request))
+        request.user = self.MockChangeUser()
+        self.assertFalse(ma.has_view_permission(request))
+        request.user = self.MockDeleteUser()
+        self.assertFalse(ma.has_view_permission(request))
+
     def test_has_add_permission(self):
         """
         has_add_permission returns True for users who can add objects and
@@ -649,6 +671,8 @@ class ModelAdminPermissionTests(SimpleTestCase):
         """
         ma = ModelAdmin(Band, AdminSite())
         request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertFalse(ma.has_add_permission(request))
         request.user = self.MockAddUser()
         self.assertTrue(ma.has_add_permission(request))
         request.user = self.MockChangeUser()
@@ -663,6 +687,8 @@ class ModelAdminPermissionTests(SimpleTestCase):
         """
         ma = ModelAdmin(Band, AdminSite())
         request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertFalse(ma.has_change_permission(request))
         request.user = self.MockAddUser()
         self.assertFalse(ma.has_change_permission(request))
         request.user = self.MockChangeUser()
@@ -677,6 +703,8 @@ class ModelAdminPermissionTests(SimpleTestCase):
         """
         ma = ModelAdmin(Band, AdminSite())
         request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertFalse(ma.has_delete_permission(request))
         request.user = self.MockAddUser()
         self.assertFalse(ma.has_delete_permission(request))
         request.user = self.MockChangeUser()
@@ -691,6 +719,8 @@ class ModelAdminPermissionTests(SimpleTestCase):
         """
         ma = ModelAdmin(Band, AdminSite())
         request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertTrue(ma.has_module_permission(request))
         request.user = self.MockAddUser()
         self.assertTrue(ma.has_module_permission(request))
         request.user = self.MockChangeUser()
@@ -701,6 +731,8 @@ class ModelAdminPermissionTests(SimpleTestCase):
         original_app_label = ma.opts.app_label
         ma.opts.app_label = 'anotherapp'
         try:
+            request.user = self.MockViewUser()
+            self.assertFalse(ma.has_module_permission(request))
             request.user = self.MockAddUser()
             self.assertFalse(ma.has_module_permission(request))
             request.user = self.MockChangeUser()
