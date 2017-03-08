@@ -240,8 +240,8 @@ class RelatedFieldWidgetWrapper(forms.Widget):
         self.can_add_related = can_add_related
         # XXX: The UX does not support multiple selected values.
         multiple = getattr(widget, 'allow_multiple_selected', False)
-        self.can_change_related = not multiple and can_change_related
         self.can_view_related = not multiple and can_view_related
+        self.can_change_related = not multiple and can_change_related
         # XXX: The deletion UX can be confusing when dealing with cascading deletion.
         cascade = getattr(rel, 'on_delete', None) is CASCADE
         self.can_delete_related = not multiple and not cascade and can_delete_related
@@ -281,32 +281,17 @@ class RelatedFieldWidgetWrapper(forms.Widget):
             'name': name,
             'url_params': url_params,
             'model': rel_opts.verbose_name,
+            'can_view_related': self.can_view_related,
+            'can_add_related': self.can_add_related,
+            'can_change_related': self.can_change_related,
+            'can_delete_related': self.can_delete_related,
         }
-        if self.can_view_related:
-            context.update(
-                can_view_related=True,
-            )
-        if self.can_change_related:
-            context.update(
-                can_change_related=True,
-            )
-        if self.can_change_related or self.can_view_related:
-            change_related_template_url = self.get_related_url(info, 'change', '__fk__')
-            context.update(
-                change_related_template_url=change_related_template_url,
-            )
+        if self.can_view_related or self.can_change_related:
+            context['change_related_template_url'] = self.get_related_url(info, 'change', '__fk__')
         if self.can_add_related:
-            add_related_url = self.get_related_url(info, 'add')
-            context.update(
-                can_add_related=True,
-                add_related_url=add_related_url,
-            )
+            context['add_related_url'] = self.get_related_url(info, 'add')
         if self.can_delete_related:
-            delete_related_template_url = self.get_related_url(info, 'delete', '__fk__')
-            context.update(
-                can_delete_related=True,
-                delete_related_template_url=delete_related_template_url,
-            )
+            context['delete_related_template_url'] = self.get_related_url(info, 'delete', '__fk__')
         return context
 
     def value_from_datadict(self, data, files, name):

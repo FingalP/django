@@ -293,7 +293,7 @@ Django quotes column and table names behind the scenes.
 .. attribute:: Options.permissions
 
     Extra permissions to enter into the permissions table when creating this object.
-    View, add, delete and change permissions are automatically created for each
+    View, add, change and delete permissions are automatically created for each
     model. This example specifies an extra permission, ``can_deliver_pizzas``::
 
         permissions = (("can_deliver_pizzas", "Can deliver pizzas"),)
@@ -312,7 +312,7 @@ Django quotes column and table names behind the scenes.
     the model is created by :djadmin:`migrate` in order to prevent any omitted
     permissions from being created.
 
-    .. versionchanged:: 1.11
+    .. versionchanged:: 2.0
 
         The ``view`` permission was added.
 

@@ -1736,11 +1736,7 @@ class AdminViewPermissionsTest(TestCase):
         change_url_2 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r2.pk,))
         change_url_3 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r3.pk,))
         change_url_6 = reverse('admin:admin_views_rowlevelchangepermissionmodel_change', args=(r6.pk,))
-        logins = [self.superuser,
-                  self.viewuser,
-                  self.changeuser,
-                  self.adduser,
-                  self.deleteuser]
+        logins = [self.superuser, self.viewuser, self.adduser, self.changeuser, self.deleteuser]
         for login_user in logins:
             self.client.force_login(login_user)
             response = self.client.get(change_url_1)
@@ -1882,11 +1878,7 @@ class AdminViewPermissionsTest(TestCase):
         rl1 = RowLevelChangePermissionModel.objects.create(name="odd id")
         rl2 = RowLevelChangePermissionModel.objects.create(name="even id")
 
-        logins = [self.superuser,
-                  self.viewuser,
-                  self.changeuser,
-                  self.adduser,
-                  self.deleteuser]
+        logins = [self.superuser, self.viewuser, self.adduser, self.changeuser, self.deleteuser]
         for login_user in logins:
             self.client.force_login(login_user)
             url = reverse('admin:admin_views_rowlevelchangepermissionmodel_history', args=(rl1.pk,))

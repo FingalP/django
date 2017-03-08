@@ -1742,14 +1742,9 @@ templates used by the :class:`ModelAdmin` views:
                 kwargs['formset'] = MyAdminFormSet
                 return super().get_changelist_formset(request, **kwargs)
 
-.. method:: ModelAdmin.has_add_permission(request)
-
-    Should return ``True`` if adding an object is permitted, ``False``
-    otherwise.
-
 .. method:: ModelAdmin.has_view_permission(request, obj=None)
 
-    .. versionadded:: 1.11
+    .. versionadded:: 2.0
 
     Should return ``True`` if viewing obj is permitted, ``False`` otherwise.
     If obj is ``None``, should return ``True`` or ``False`` to indicate whether
@@ -1758,6 +1753,11 @@ templates used by the :class:`ModelAdmin` views:
     view any object of this type).
     The ``view`` permission has been made with backward compatibility in mind, so
     ``change`` permission imply that user can also view objects.
+
+.. method:: ModelAdmin.has_add_permission(request)
+
+    Should return ``True`` if adding an object is permitted, ``False``
+    otherwise.
 
 .. method:: ModelAdmin.has_change_permission(request, obj=None)
 
