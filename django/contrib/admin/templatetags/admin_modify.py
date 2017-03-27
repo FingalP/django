@@ -66,8 +66,9 @@ def submit_row(context):
             has_add_permission and not is_popup and
             (not save_as or add) and can_save
         ),
-        'show_save_and_continue': not is_popup and can_save and has_change_permission and show_save_and_continue,
+        'show_save_and_continue': not is_popup and can_save and show_save_and_continue,
         'show_save': show_save and can_save,
+        'show_close': not( show_save and can_save )
     })
     return ctx
 

@@ -261,7 +261,7 @@ body.popup .submit-row {
     overflow: auto;
 }
 
-.submit-row input {
+.submit-row input, .submit-row a.button {
     height: 35px;
     line-height: 15px;
     margin: 0 0 0 5px;
@@ -281,9 +281,7 @@ body.popup .submit-row {
     margin: 0;
 }
 
-.submit-row a.deletelink {
-    display: block;
-    background: #ba2121;
+.submit-row a.deletelink, .submit-row a.closelink {
     border-radius: 4px;
     padding: 10px 15px;
     height: 15px;
@@ -291,10 +289,25 @@ body.popup .submit-row {
     color: #fff;
 }
 
+.submit-row a.deletelink {
+    display: block;
+    background: #ba2121;
+}
+
+.submit-row a.closelink {
+    background: #bbbbbb;
+}
+
 .submit-row a.deletelink:focus,
 .submit-row a.deletelink:hover,
 .submit-row a.deletelink:active {
     background: #a41515;
+}
+
+.submit-row a.closelink:focus,
+.submit-row a.closelink:hover,
+.submit-row a.closelink:active {
+    background: #aaaaaa;
 }
 
 /* CUSTOM FORM FIELDS */
