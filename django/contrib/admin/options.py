@@ -327,7 +327,6 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         local_fields = [field.name for field in self.opts.local_fields]
         local_many_to_many = [field.name for field in self.opts.local_many_to_many]
         readonly_fields = list(self.get_readonly_fields(request, obj))
-        local_fields = [field.name for field in self.opts.local_fields]
         return local_fields + local_many_to_many + readonly_fields
 
     def get_prepopulated_fields(self, request, obj=None):
@@ -463,15 +462,6 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         codename = get_permission_codename('view', opts)
         return request.user.has_perm("%s.%s" % (opts.app_label, codename))
 
-    def has_add_permission(self, request):
-        """
-        Return True if the given request has permission to add an object.
-        Can be overridden by the user in subclasses.
-        """
-        opts = self.opts
-        codename = get_permission_codename('add', opts)
-        return request.user.has_perm("%s.%s" % (opts.app_label, codename))
-
     def has_change_permission(self, request, obj=None):
         """
         Return True if the given request has permission to change the given
@@ -485,6 +475,15 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         """
         opts = self.opts
         codename = get_permission_codename('change', opts)
+        return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+
+    def has_add_permission(self, request):
+        """
+        Return True if the given request has permission to add an object.
+        Can be overridden by the user in subclasses.
+        """
+        opts = self.opts
+        codename = get_permission_codename('add', opts)
         return request.user.has_perm("%s.%s" % (opts.app_label, codename))
 
     def has_delete_permission(self, request, obj=None):
