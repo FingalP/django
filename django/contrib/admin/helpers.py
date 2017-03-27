@@ -225,7 +225,7 @@ class InlineAdminFormSet:
     A wrapper around an inline formset for use in the admin system.
     """
     def __init__(self, inline, formset, fieldsets, prepopulated_fields=None,
-                 readonly_fields=None, uneditable_fields=None, has_add_permission=True,
+                 readonly_fields=None, has_add_permission=True,
                  has_change_permission=True, has_delete_permission=True, model_admin=None):
         self.opts = inline
         self.formset = formset
@@ -234,9 +234,11 @@ class InlineAdminFormSet:
         if readonly_fields is None:
             readonly_fields = ()
         self.readonly_fields = readonly_fields
-        if uneditable_fields is None:
-            uneditable_fields = ()
-        self.uneditable_fields = uneditable_fields
+
+        if has_change_permission:
+            self.viewonly_fields = readonly_fields
+        else:
+            self.viewonly_fields = readonly_fields + flatten_fieldsets(fieldsets)
         if prepopulated_fields is None:
             prepopulated_fields = {}
         self.prepopulated_fields = prepopulated_fields
@@ -250,7 +252,7 @@ class InlineAdminFormSet:
             view_on_site_url = self.opts.get_view_on_site_url(original)
             yield InlineAdminForm(
                 self.formset, form, self.fieldsets, self.prepopulated_fields,
-                original, self.uneditable_fields, model_admin=self.opts,
+                original, self.viewonly_fields, model_admin=self.opts,
                 view_on_site_url=view_on_site_url,
             )
         for form in self.formset.extra_forms:
@@ -271,7 +273,7 @@ class InlineAdminFormSet:
         for i, field_name in enumerate(flatten_fieldsets(self.fieldsets)):
             if fk and fk.name == field_name:
                 continue
-            if field_name in self.uneditable_fields:
+            if field_name in self.readonly_fields:
                 yield {
                     'label': label_for_field(field_name, self.opts.model, self.opts),
                     'widget': {'is_hidden': False},

@@ -314,21 +314,6 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
         """
         return self.readonly_fields
 
-    def get_uneditable_fields(self, request, obj=None):
-        """
-        Get fields that are either readonly or hasn't change/add permissions
-        """
-        if hasattr(request, 'user') and (
-                self.has_change_permission(request, obj) or (self.has_add_permission(request) and not obj)):
-            return self.get_readonly_fields(request, obj)
-        elif self.fieldsets:
-            return flatten_fieldsets(self.get_fieldsets(request, obj))
-
-        local_fields = [field.name for field in self.opts.local_fields]
-        local_many_to_many = [field.name for field in self.opts.local_many_to_many]
-        readonly_fields = list(self.get_readonly_fields(request, obj))
-        return local_fields + local_many_to_many + readonly_fields
-
     def get_prepopulated_fields(self, request, obj=None):
         """
         Hook for specifying custom prepopulated fields.
@@ -636,9 +621,9 @@ class ModelAdmin(BaseModelAdmin):
         if self.fields:
             return self.fields
         form = self.get_form(request, obj, fields=None)
-        return list(form.base_fields) + list(self.get_uneditable_fields(request, obj))
+        return list(form.base_fields) + list(self.get_readonly_fields(request, obj))
 
-    def get_form(self, request, obj=None, **kwargs):
+    def get_form(self, request, obj=None, change=False, **kwargs):
         """
         Return a Form class for use in the admin add view. This is used by
         add_view and change_view.
@@ -649,8 +634,15 @@ class ModelAdmin(BaseModelAdmin):
             fields = flatten_fieldsets(self.get_fieldsets(request, obj))
         excluded = self.get_exclude(request, obj)
         exclude = [] if excluded is None else list(excluded)
-        uneditable_fields = self.get_uneditable_fields(request, obj)
-        exclude.extend(uneditable_fields)
+        readonly_fields = self.get_readonly_fields(request, obj)
+        exclude.extend(readonly_fields)
+
+        # If it is a change form and the user has no permission, we exlcude all the fields
+        if (change and hasattr(request, 'user') and not
+            self.has_change_permission(request, obj)):
+            exclude.extend(fields)
+
+
         if excluded is None and hasattr(self.form, '_meta') and self.form._meta.exclude:
             # Take the custom ModelForm's Meta.exclude into account only if the
             # ModelAdmin doesn't define its own.
@@ -659,9 +651,9 @@ class ModelAdmin(BaseModelAdmin):
         # default on modelform_factory
         exclude = exclude or None
 
-        # Remove declared form fields which are in uneditable_fields.
+        # Remove declared form fields which are in readonly_fields.
         new_attrs = OrderedDict(
-            (f, None) for f in uneditable_fields
+            (f, None) for f in readonly_fields
             if f in self.form.declared_fields
         )
         form = type(self.form.__name__, (self.form,), new_attrs)
@@ -1407,18 +1399,18 @@ class ModelAdmin(BaseModelAdmin):
         )
 
     def get_inline_formsets(self, request, formsets, inline_instances, obj=None):
+
         inline_admin_formsets = []
         for inline, formset in zip(inline_instances, formsets):
             fieldsets = list(inline.get_fieldsets(request, obj))
             readonly = list(inline.get_readonly_fields(request, obj))
-            uneditable = list(inline.get_uneditable_fields(request, obj))
             has_add_permission = inline.has_add_permission(request)
             has_change_permission = inline.has_change_permission(request)
             has_delete_permission = inline.has_delete_permission(request)
             prepopulated = dict(inline.get_prepopulated_fields(request, obj))
             inline_admin_formset = helpers.InlineAdminFormSet(
                 inline, formset, fieldsets, prepopulated, readonly,
-                uneditable, has_add_permission, has_change_permission, has_delete_permission,
+                has_add_permission, has_change_permission, has_delete_permission,
                 model_admin=self,
             )
             inline_admin_formsets.append(inline_admin_formset)
@@ -1484,7 +1476,7 @@ class ModelAdmin(BaseModelAdmin):
             if obj is None:
                 return self._get_obj_does_not_exist_redirect(request, opts, object_id)
 
-        ModelForm = self.get_form(request, obj)
+        ModelForm = self.get_form(request, obj, change=not add)
         if request.method == 'POST':
             form = ModelForm(request.POST, request.FILES, instance=obj)
             if form.is_valid():
@@ -1514,12 +1506,15 @@ class ModelAdmin(BaseModelAdmin):
             else:
                 form = ModelForm(instance=obj)
                 formsets, inline_instances = self._create_formsets(request, obj, change=True)
-
+        if not add and not self.has_change_permission(request):
+            uneditable_fields = flatten_fieldsets(self.get_fieldsets(request, obj))
+        else:
+            uneditable_fields = self.get_readonly_fields(request, obj)
         adminForm = helpers.AdminForm(
             form,
             list(self.get_fieldsets(request, obj)),
             self.get_prepopulated_fields(request, obj),
-            self.get_uneditable_fields(request, obj),
+            uneditable_fields,
             model_admin=self)
         media = self.media + adminForm.media
 
