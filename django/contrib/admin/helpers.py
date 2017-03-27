@@ -225,8 +225,8 @@ class InlineAdminFormSet:
     A wrapper around an inline formset for use in the admin system.
     """
     def __init__(self, inline, formset, fieldsets, prepopulated_fields=None,
-                 readonly_fields=None, has_add_permission=True,
-                 has_change_permission=True, has_delete_permission=True, model_admin=None):
+                 readonly_fields=None, model_admin=None, has_view_permission=True, has_add_permission=True,
+                 has_change_permission=True, has_delete_permission=True):
         self.opts = inline
         self.formset = formset
         self.fieldsets = fieldsets
@@ -243,6 +243,7 @@ class InlineAdminFormSet:
             prepopulated_fields = {}
         self.prepopulated_fields = prepopulated_fields
         self.classes = ' '.join(inline.classes) if inline.classes else ''
+        self.has_view_permission = has_view_permission
         self.has_add_permission = has_add_permission
         self.has_change_permission = has_change_permission
         self.has_delete_permission = has_delete_permission

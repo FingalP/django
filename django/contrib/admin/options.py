@@ -1404,14 +1404,15 @@ class ModelAdmin(BaseModelAdmin):
         for inline, formset in zip(inline_instances, formsets):
             fieldsets = list(inline.get_fieldsets(request, obj))
             readonly = list(inline.get_readonly_fields(request, obj))
+            has_view_permission = inline.has_view_permission(request)
             has_add_permission = inline.has_add_permission(request)
             has_change_permission = inline.has_change_permission(request)
             has_delete_permission = inline.has_delete_permission(request)
             prepopulated = dict(inline.get_prepopulated_fields(request, obj))
             inline_admin_formset = helpers.InlineAdminFormSet(
-                inline, formset, fieldsets, prepopulated, readonly,
-                has_add_permission, has_change_permission, has_delete_permission,
-                model_admin=self,
+                inline, formset, fieldsets, prepopulated, readonly, model_admin=self,
+                has_view_permission=has_view_permission, has_add_permission=has_add_permission,
+                has_change_permission=has_change_permission, has_delete_permission=has_delete_permission,
             )
             inline_admin_formsets.append(inline_admin_formset)
         return inline_admin_formsets
