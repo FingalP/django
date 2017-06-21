@@ -638,10 +638,8 @@ class ModelAdmin(BaseModelAdmin):
         exclude.extend(readonly_fields)
 
         # If it is a change form and the user has no permission, we exlcude all the fields
-        if (change and hasattr(request, 'user') and not
-            self.has_change_permission(request, obj)):
+        if change and hasattr(request, 'user') and not self.has_change_permission(request, obj):
             exclude.extend(fields)
-
 
         if excluded is None and hasattr(self.form, '_meta') and self.form._meta.exclude:
             # Take the custom ModelForm's Meta.exclude into account only if the
