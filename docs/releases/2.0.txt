@@ -403,14 +403,15 @@ Custom admin forms need to take read-only case into account
 
 With the new view permission, existing custom admin forms may throw errors when there
 is no change permission, because they access inexistent fields. This is easily fixed
-by checking if the user has the change persmissions in the get form, and returning the
-default form if it is readonly:
+by checking if the user has the change permissions in the get form, and returning the
+default form if it is read only::
 
     class MyAdmin(admin.ModelAdmin):
         def get_form(self, request, obj=None, **kwargs):
             if not self.has_change_permission(request, obj):
                 return super().get_form(request, obj, **kwargs)
             return CustomForm
+
 ``QuerySet.reverse()`` and ``last()`` are prohibited after slicing
 ------------------------------------------------------------------
 
