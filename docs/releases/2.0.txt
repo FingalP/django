@@ -41,7 +41,7 @@ Minor features
 :mod:`django.contrib.admin`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* ...
+* A new ``view`` permission is automatically created, allowing to create read-only permissions.
 
 :mod:`django.contrib.admindocs`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -271,6 +271,21 @@ If you wish to keep this restriction in the admin when editing users, set
 
     admin.site.unregister(User)
     admin.site.register(User, MyUserAdmin)
+
+
+Custom admin forms need to take read-only case into account
+-----------------------------------------------------------
+
+With the new view permission, existing custom admin forms may throw errors when there
+is no change permission, because they access inexistent fields. This is easily fixed
+by checking if the user has the change persmissions in the get form, and returning the
+default form if it is readonly:
+
+    class MyAdmin(admin.ModelAdmin):
+        def get_form(self, request, obj=None, **kwargs):
+            if not self.has_change_permission(request, obj):
+                return super().get_form(request, obj, **kwargs)
+            return CustomForm
 
 Miscellaneous
 -------------
