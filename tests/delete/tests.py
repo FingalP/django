@@ -60,7 +60,11 @@ class OnDeleteTests(TestCase):
 
     def test_protect(self):
         a = create_a('protect')
-        with self.assertRaises(IntegrityError):
+        msg = (
+            "Cannot delete some instances of model 'R' because they are "
+            "referenced through a protected foreign key: 'A.protect'"
+        )
+        with self.assertRaisesMessage(IntegrityError, msg):
             a.protect.delete()
 
     def test_do_nothing(self):
@@ -186,7 +190,7 @@ class DeletionTests(TestCase):
             obj = kwargs['instance']
             deleted.append(obj)
             if isinstance(obj, R):
-                related_setnull_sets.append(list(a.pk for a in obj.setnull_set.all()))
+                related_setnull_sets.append([a.pk for a in obj.setnull_set.all()])
 
         models.signals.pre_delete.connect(pre_delete)
         a = create_a('update_setnull')

@@ -8,7 +8,9 @@ from urllib.parse import ParseResult, quote, urlparse
 from django.apps import apps
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
-from django.contrib.auth import REDIRECT_FIELD_NAME, SESSION_KEY
+from django.contrib.auth import (
+    BACKEND_SESSION_KEY, REDIRECT_FIELD_NAME, SESSION_KEY,
+)
 from django.contrib.auth.forms import (
     AuthenticationForm, PasswordChangeForm, SetPasswordForm,
 )
@@ -106,10 +108,11 @@ class AuthViewNamedURLTests(AuthViewsTestCase):
             ('password_reset_complete', [], {}),
         ]
         for name, args, kwargs in expected_named_urls:
-            try:
-                reverse(name, args=args, kwargs=kwargs)
-            except NoReverseMatch:
-                self.fail("Reversal of url named '%s' failed with NoReverseMatch" % name)
+            with self.subTest(name=name):
+                try:
+                    reverse(name, args=args, kwargs=kwargs)
+                except NoReverseMatch:
+                    self.fail("Reversal of url named '%s' failed with NoReverseMatch" % name)
 
 
 class PasswordResetTest(AuthViewsTestCase):
@@ -327,6 +330,22 @@ class PasswordResetTest(AuthViewsTestCase):
         self.assertRedirects(response, '/reset/done/', fetch_redirect_response=False)
         self.assertIn(SESSION_KEY, self.client.session)
 
+    @override_settings(
+        AUTHENTICATION_BACKENDS=[
+            'django.contrib.auth.backends.ModelBackend',
+            'django.contrib.auth.backends.AllowAllUsersModelBackend',
+        ]
+    )
+    def test_confirm_login_post_reset_custom_backend(self):
+        # This backend is specified in the url().
+        backend = 'django.contrib.auth.backends.AllowAllUsersModelBackend'
+        url, path = self._test_confirm_start()
+        path = path.replace('/reset/', '/reset/post_reset_login_custom_backend/')
+        response = self.client.post(path, {'new_password1': 'anewpassword', 'new_password2': 'anewpassword'})
+        self.assertRedirects(response, '/reset/done/', fetch_redirect_response=False)
+        self.assertIn(SESSION_KEY, self.client.session)
+        self.assertEqual(self.client.session[BACKEND_SESSION_KEY], backend)
+
     def test_confirm_login_post_reset_already_logged_in(self):
         url, path = self._test_confirm_start()
         path = path.replace('/reset/', '/reset/post_reset_login/')
@@ -541,48 +560,54 @@ class LoginTest(AuthViewsTestCase):
     def test_security_check(self):
         login_url = reverse('login')
 
-        # Those URLs should not pass the security check
-        for bad_url in ('http://example.com',
-                        'http:///example.com',
-                        'https://example.com',
-                        'ftp://example.com',
-                        '///example.com',
-                        '//example.com',
-                        'javascript:alert("XSS")'):
+        # These URLs should not pass the security check.
+        bad_urls = (
+            'http://example.com',
+            'http:///example.com',
+            'https://example.com',
+            'ftp://example.com',
+            '///example.com',
+            '//example.com',
+            'javascript:alert("XSS")',
+        )
+        for bad_url in bad_urls:
+            with self.subTest(bad_url=bad_url):
+                nasty_url = '%(url)s?%(next)s=%(bad_url)s' % {
+                    'url': login_url,
+                    'next': REDIRECT_FIELD_NAME,
+                    'bad_url': quote(bad_url),
+                }
+                response = self.client.post(nasty_url, {
+                    'username': 'testclient',
+                    'password': 'password',
+                })
+                self.assertEqual(response.status_code, 302)
+                self.assertNotIn(bad_url, response.url, '%s should be blocked' % bad_url)
 
-            nasty_url = '%(url)s?%(next)s=%(bad_url)s' % {
-                'url': login_url,
-                'next': REDIRECT_FIELD_NAME,
-                'bad_url': quote(bad_url),
-            }
-            response = self.client.post(nasty_url, {
-                'username': 'testclient',
-                'password': 'password',
-            })
-            self.assertEqual(response.status_code, 302)
-            self.assertNotIn(bad_url, response.url,
-                             "%s should be blocked" % bad_url)
-
-        # These URLs *should* still pass the security check
-        for good_url in ('/view/?param=http://example.com',
-                         '/view/?param=https://example.com',
-                         '/view?param=ftp://example.com',
-                         'view/?param=//example.com',
-                         'https://testserver/',
-                         'HTTPS://testserver/',
-                         '//testserver/',
-                         '/url%20with%20spaces/'):  # see ticket #12534
-            safe_url = '%(url)s?%(next)s=%(good_url)s' % {
-                'url': login_url,
-                'next': REDIRECT_FIELD_NAME,
-                'good_url': quote(good_url),
-            }
-            response = self.client.post(safe_url, {
-                'username': 'testclient',
-                'password': 'password',
-            })
-            self.assertEqual(response.status_code, 302)
-            self.assertIn(good_url, response.url, "%s should be allowed" % good_url)
+        # These URLs should pass the security check.
+        good_urls = (
+            '/view/?param=http://example.com',
+            '/view/?param=https://example.com',
+            '/view?param=ftp://example.com',
+            'view/?param=//example.com',
+            'https://testserver/',
+            'HTTPS://testserver/',
+            '//testserver/',
+            '/url%20with%20spaces/',
+        )
+        for good_url in good_urls:
+            with self.subTest(good_url=good_url):
+                safe_url = '%(url)s?%(next)s=%(good_url)s' % {
+                    'url': login_url,
+                    'next': REDIRECT_FIELD_NAME,
+                    'good_url': quote(good_url),
+                }
+                response = self.client.post(safe_url, {
+                    'username': 'testclient',
+                    'password': 'password',
+                })
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(good_url, response.url, '%s should be allowed' % good_url)
 
     def test_security_check_https(self):
         login_url = reverse('login')
@@ -810,6 +835,7 @@ class LoginRedirectAuthenticatedUser(AuthViewsTestCase):
         self.login()
         response = self.client.get(self.dont_redirect_url)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['next'], '')
 
     def test_guest(self):
         """If not logged in, stay on the same page."""
@@ -970,45 +996,52 @@ class LogoutTest(AuthViewsTestCase):
     def test_security_check(self):
         logout_url = reverse('logout')
 
-        # Those URLs should not pass the security check
-        for bad_url in ('http://example.com',
-                        'http:///example.com',
-                        'https://example.com',
-                        'ftp://example.com',
-                        '///example.com',
-                        '//example.com',
-                        'javascript:alert("XSS")'):
-            nasty_url = '%(url)s?%(next)s=%(bad_url)s' % {
-                'url': logout_url,
-                'next': REDIRECT_FIELD_NAME,
-                'bad_url': quote(bad_url),
-            }
-            self.login()
-            response = self.client.get(nasty_url)
-            self.assertEqual(response.status_code, 302)
-            self.assertNotIn(bad_url, response.url,
-                             "%s should be blocked" % bad_url)
-            self.confirm_logged_out()
+        # These URLs should not pass the security check.
+        bad_urls = (
+            'http://example.com',
+            'http:///example.com',
+            'https://example.com',
+            'ftp://example.com',
+            '///example.com',
+            '//example.com',
+            'javascript:alert("XSS")',
+        )
+        for bad_url in bad_urls:
+            with self.subTest(bad_url=bad_url):
+                nasty_url = '%(url)s?%(next)s=%(bad_url)s' % {
+                    'url': logout_url,
+                    'next': REDIRECT_FIELD_NAME,
+                    'bad_url': quote(bad_url),
+                }
+                self.login()
+                response = self.client.get(nasty_url)
+                self.assertEqual(response.status_code, 302)
+                self.assertNotIn(bad_url, response.url, '%s should be blocked' % bad_url)
+                self.confirm_logged_out()
 
-        # These URLs *should* still pass the security check
-        for good_url in ('/view/?param=http://example.com',
-                         '/view/?param=https://example.com',
-                         '/view?param=ftp://example.com',
-                         'view/?param=//example.com',
-                         'https://testserver/',
-                         'HTTPS://testserver/',
-                         '//testserver/',
-                         '/url%20with%20spaces/'):  # see ticket #12534
-            safe_url = '%(url)s?%(next)s=%(good_url)s' % {
-                'url': logout_url,
-                'next': REDIRECT_FIELD_NAME,
-                'good_url': quote(good_url),
-            }
-            self.login()
-            response = self.client.get(safe_url)
-            self.assertEqual(response.status_code, 302)
-            self.assertIn(good_url, response.url, "%s should be allowed" % good_url)
-            self.confirm_logged_out()
+        # These URLs should pass the security check.
+        good_urls = (
+            '/view/?param=http://example.com',
+            '/view/?param=https://example.com',
+            '/view?param=ftp://example.com',
+            'view/?param=//example.com',
+            'https://testserver/',
+            'HTTPS://testserver/',
+            '//testserver/',
+            '/url%20with%20spaces/',
+        )
+        for good_url in good_urls:
+            with self.subTest(good_url=good_url):
+                safe_url = '%(url)s?%(next)s=%(good_url)s' % {
+                    'url': logout_url,
+                    'next': REDIRECT_FIELD_NAME,
+                    'good_url': quote(good_url),
+                }
+                self.login()
+                response = self.client.get(safe_url)
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(good_url, response.url, '%s should be allowed' % good_url)
+                self.confirm_logged_out()
 
     def test_security_check_https(self):
         logout_url = reverse('logout')

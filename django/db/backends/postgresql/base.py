@@ -14,6 +14,7 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.utils import DatabaseError as WrappedDatabaseError
 from django.utils.functional import cached_property
 from django.utils.safestring import SafeText
+from django.utils.version import get_version_tuple
 
 try:
     import psycopg2 as Database
@@ -25,13 +26,13 @@ except ImportError as e:
 
 def psycopg2_version():
     version = psycopg2.__version__.split(' ', 1)[0]
-    return tuple(int(v) for v in version.split('.') if v.isdigit())
+    return get_version_tuple(version)
 
 
 PSYCOPG2_VERSION = psycopg2_version()
 
-if PSYCOPG2_VERSION < (2, 4, 5):
-    raise ImproperlyConfigured("psycopg2_version 2.4.5 or newer is required; you have %s" % psycopg2.__version__)
+if PSYCOPG2_VERSION < (2, 5, 4):
+    raise ImproperlyConfigured("psycopg2_version 2.5.4 or newer is required; you have %s" % psycopg2.__version__)
 
 
 # Some of these import psycopg2, so import them after checking if it's installed.
@@ -59,6 +60,7 @@ psycopg2.extensions.register_type(INETARRAY)
 
 class DatabaseWrapper(BaseDatabaseWrapper):
     vendor = 'postgresql'
+    display_name = 'PostgreSQL'
     # This dictionary maps Field objects to their associated PostgreSQL column
     # types, as strings. Column-type strings can contain format strings; they'll
     # be interpolated against the values of Field.__dict__ before being output.

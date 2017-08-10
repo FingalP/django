@@ -71,7 +71,7 @@ class CreateModel(ModelOperation):
         if self.managers and self.managers != [('objects', models.Manager())]:
             kwargs['managers'] = self.managers
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -232,7 +232,7 @@ class DeleteModel(ModelOperation):
             'name': self.name,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -276,7 +276,7 @@ class RenameModel(ModelOperation):
             'new_name': self.new_name,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -429,7 +429,7 @@ class AlterModelTable(ModelOperation):
             'table': self.table,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -496,7 +496,7 @@ class AlterUniqueTogether(FieldRelatedOptionOperation):
 
     def __init__(self, name, unique_together):
         unique_together = normalize_together(unique_together)
-        self.unique_together = set(tuple(cons) for cons in unique_together)
+        self.unique_together = {tuple(cons) for cons in unique_together}
         super().__init__(name)
 
     def deconstruct(self):
@@ -505,7 +505,7 @@ class AlterUniqueTogether(FieldRelatedOptionOperation):
             'unique_together': self.unique_together,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -550,7 +550,7 @@ class AlterIndexTogether(FieldRelatedOptionOperation):
 
     def __init__(self, name, index_together):
         index_together = normalize_together(index_together)
-        self.index_together = set(tuple(cons) for cons in index_together)
+        self.index_together = {tuple(cons) for cons in index_together}
         super().__init__(name)
 
     def deconstruct(self):
@@ -559,7 +559,7 @@ class AlterIndexTogether(FieldRelatedOptionOperation):
             'index_together': self.index_together,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -608,7 +608,7 @@ class AlterOrderWithRespectTo(FieldRelatedOptionOperation):
             'order_with_respect_to': self.order_with_respect_to,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -683,7 +683,7 @@ class AlterModelOptions(ModelOptionOperation):
             'options': self.options,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs
         )
@@ -718,7 +718,7 @@ class AlterModelManagers(ModelOptionOperation):
 
     def deconstruct(self):
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [self.name, self.managers],
             {}
         )
@@ -760,7 +760,10 @@ class AddIndex(IndexOperation):
 
     def state_forwards(self, app_label, state):
         model_state = state.models[app_label, self.model_name_lower]
-        model_state.options[self.option_name].append(self.index)
+        indexes = list(model_state.options[self.option_name])
+        indexes.append(self.index.clone())
+        model_state.options[self.option_name] = indexes
+        state.reload_model(app_label, self.model_name_lower, delay=True)
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         model = to_state.apps.get_model(app_label, self.model_name)
@@ -778,7 +781,7 @@ class AddIndex(IndexOperation):
             'index': self.index,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs,
         )
@@ -802,6 +805,7 @@ class RemoveIndex(IndexOperation):
         model_state = state.models[app_label, self.model_name_lower]
         indexes = model_state.options[self.option_name]
         model_state.options[self.option_name] = [idx for idx in indexes if idx.name != self.name]
+        state.reload_model(app_label, self.model_name_lower, delay=True)
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         model = from_state.apps.get_model(app_label, self.model_name)
@@ -823,7 +827,7 @@ class RemoveIndex(IndexOperation):
             'name': self.name,
         }
         return (
-            self.__class__.__name__,
+            self.__class__.__qualname__,
             [],
             kwargs,
         )

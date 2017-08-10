@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import tempfile
+from contextlib import suppress
 
 from django.conf import settings
 from django.contrib.sessions.backends.base import (
@@ -11,7 +12,6 @@ from django.contrib.sessions.backends.base import (
 from django.contrib.sessions.exceptions import InvalidSessionKey
 from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
 from django.utils import timezone
-from django.utils.encoding import force_text
 
 
 class SessionStore(SessionBase):
@@ -52,7 +52,7 @@ class SessionStore(SessionBase):
         # Make sure we're not vulnerable to directory traversal. Session keys
         # should always be md5s, so they should never contain directory
         # components.
-        if not set(session_key).issubset(set(VALID_KEY_CHARS)):
+        if not set(session_key).issubset(VALID_KEY_CHARS):
             raise InvalidSessionKey(
                 "Invalid characters in session key")
 
@@ -92,7 +92,7 @@ class SessionStore(SessionBase):
                 except (EOFError, SuspiciousOperation) as e:
                     if isinstance(e, SuspiciousOperation):
                         logger = logging.getLogger('django.security.%s' % e.__class__.__name__)
-                        logger.warning(force_text(e))
+                        logger.warning(str(e))
                     self.create()
 
                 # Remove expired sessions.
@@ -156,7 +156,7 @@ class SessionStore(SessionBase):
         # See ticket #8616.
         dir, prefix = os.path.split(session_file_name)
 
-        try:
+        with suppress(OSError, IOError, EOFError):
             output_file_fd, output_file_name = tempfile.mkstemp(dir=dir, prefix=prefix + '_out_')
             renamed = False
             try:
@@ -174,9 +174,6 @@ class SessionStore(SessionBase):
                 if not renamed:
                     os.unlink(output_file_name)
 
-        except (OSError, IOError, EOFError):
-            pass
-
     def exists(self, session_key):
         return os.path.exists(self._key_to_file(session_key))
 
@@ -185,10 +182,8 @@ class SessionStore(SessionBase):
             if self.session_key is None:
                 return
             session_key = self.session_key
-        try:
+        with suppress(OSError):
             os.unlink(self._key_to_file(session_key))
-        except OSError:
-            pass
 
     def clean(self):
         pass

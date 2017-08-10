@@ -197,7 +197,7 @@ class NonAggregateAnnotationTestCase(TestCase):
             name_lower=Lower('last_name'),
         ).distinct('name_lower')
 
-        self.assertEqual(set(p.last_name for p in people), {'Stark', 'Roosevelt'})
+        self.assertEqual({p.last_name for p in people}, {'Stark', 'Roosevelt'})
         self.assertEqual(len(people), 2)
 
         people2 = Employee.objects.annotate(
@@ -296,6 +296,12 @@ class NonAggregateAnnotationTestCase(TestCase):
         book = qs.annotate(other_isbn=F('isbn')).get(other_rating=4)
         self.assertEqual(book['other_rating'], 4)
         self.assertEqual(book['other_isbn'], '155860191')
+
+    def test_values_with_pk_annotation(self):
+        # annotate references a field in values() with pk
+        publishers = Publisher.objects.values('id', 'book__rating').annotate(total=Sum('book__rating'))
+        for publisher in publishers.filter(pk=self.p1.pk):
+            self.assertEqual(publisher['book__rating'], publisher['total'])
 
     def test_defer_annotation(self):
         """
@@ -502,3 +508,12 @@ class NonAggregateAnnotationTestCase(TestCase):
             self.assertIs(book.is_book, True)
             self.assertIs(book.is_pony, False)
             self.assertIsNone(book.is_none)
+
+    def test_arguments_must_be_expressions(self):
+        msg = 'QuerySet.annotate() received non-expression(s): %s.'
+        with self.assertRaisesMessage(TypeError, msg % BooleanField()):
+            Book.objects.annotate(BooleanField())
+        with self.assertRaisesMessage(TypeError, msg % True):
+            Book.objects.annotate(is_book=True)
+        with self.assertRaisesMessage(TypeError, msg % ', '.join([str(BooleanField()), 'True'])):
+            Book.objects.annotate(BooleanField(), Value(False), is_book=True)

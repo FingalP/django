@@ -15,7 +15,7 @@ API reference
 =============
 
 ``CheckMessage``
------------------
+----------------
 
 .. class:: CheckMessage(level, msg, hint=None, obj=None, id=None)
 
@@ -154,6 +154,7 @@ Model fields
   human readable name)`` tuples.
 * **fields.E006**: ``db_index`` must be ``None``, ``True`` or ``False``.
 * **fields.E007**: Primary keys must not have ``null=True``.
+* **fields.E008**: All ``validators`` must be callable.
 * **fields.E100**: ``AutoField``\s must set primary_key=True.
 * **fields.E110**: ``BooleanField``\s do not accept null values.
 * **fields.E120**: ``CharField``\s must define a ``max_length`` attribute.
@@ -171,6 +172,8 @@ Model fields
 * **fields.E160**: The options ``auto_now``, ``auto_now_add``, and ``default``
   are mutually exclusive. Only one of these options may be present.
 * **fields.W161**: Fixed default value provided.
+* **fields.W162**: ``<database>`` does not support a database index on
+  ``<field data type>`` columns.
 * **fields.E900**: ``IPAddressField`` has been removed except for support in
   historical migrations.
 * **fields.W900**: ``IPAddressField`` has been deprecated. Support for it
@@ -665,6 +668,7 @@ The following checks are performed when a model contains a
 * **contenttypes.E003**: ``<field>`` is not a ``ForeignKey``.
 * **contenttypes.E004**: ``<field>`` is not a ``ForeignKey`` to
   ``contenttypes.ContentType``.
+* **contenttypes.E005**: Model names must be at most 100 characters.
 
 ``sites``
 ---------

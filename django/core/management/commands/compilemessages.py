@@ -43,7 +43,7 @@ class Command(BaseCommand):
             help='Locales to exclude. Default is none. Can be used multiple times.',
         )
         parser.add_argument(
-            '--use-fuzzy', '-f', dest='fuzzy', action='store_true', default=False,
+            '--use-fuzzy', '-f', dest='fuzzy', action='store_true',
             help='Use fuzzy translations.',
         )
 
@@ -85,7 +85,7 @@ class Command(BaseCommand):
 
         # Account for excluded locales
         locales = locale or all_locales
-        locales = set(locales) - set(exclude)
+        locales = set(locales).difference(exclude)
 
         for basedir in basedirs:
             if locales:

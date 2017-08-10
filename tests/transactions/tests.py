@@ -1,5 +1,3 @@
-import os
-import signal
 import sys
 import threading
 import time
@@ -218,18 +216,6 @@ class AtomicTests(TransactionTestCase):
             transaction.savepoint_rollback(sid)
         self.assertQuerysetEqual(Reporter.objects.all(), ['<Reporter: Tintin>'])
 
-    @skipIf(sys.platform.startswith('win'), "Windows doesn't have signals.")
-    def test_rollback_on_keyboardinterrupt(self):
-        try:
-            with transaction.atomic():
-                Reporter.objects.create(first_name='Tintin')
-                # Send SIGINT (simulate Ctrl-C). One call isn't enough.
-                os.kill(os.getpid(), signal.SIGINT)
-                os.kill(os.getpid(), signal.SIGINT)
-        except KeyboardInterrupt:
-            pass
-        self.assertEqual(Reporter.objects.all().count(), 0)
-
 
 class AtomicInsideTransactionTests(AtomicTests):
     """All basic tests for atomic should also pass within an existing transaction."""
@@ -313,20 +299,21 @@ class AtomicMergeTests(TransactionTestCase):
 class AtomicErrorsTests(TransactionTestCase):
 
     available_apps = ['transactions']
+    forbidden_atomic_msg = "This is forbidden when an 'atomic' block is active."
 
     def test_atomic_prevents_setting_autocommit(self):
         autocommit = transaction.get_autocommit()
         with transaction.atomic():
-            with self.assertRaises(transaction.TransactionManagementError):
+            with self.assertRaisesMessage(transaction.TransactionManagementError, self.forbidden_atomic_msg):
                 transaction.set_autocommit(not autocommit)
         # Make sure autocommit wasn't changed.
         self.assertEqual(connection.autocommit, autocommit)
 
     def test_atomic_prevents_calling_transaction_methods(self):
         with transaction.atomic():
-            with self.assertRaises(transaction.TransactionManagementError):
+            with self.assertRaisesMessage(transaction.TransactionManagementError, self.forbidden_atomic_msg):
                 transaction.commit()
-            with self.assertRaises(transaction.TransactionManagementError):
+            with self.assertRaisesMessage(transaction.TransactionManagementError, self.forbidden_atomic_msg):
                 transaction.rollback()
 
     def test_atomic_prevents_queries_in_broken_transaction(self):
@@ -336,7 +323,11 @@ class AtomicErrorsTests(TransactionTestCase):
             with self.assertRaises(IntegrityError):
                 r2.save(force_insert=True)
             # The transaction is marked as needing rollback.
-            with self.assertRaises(transaction.TransactionManagementError):
+            msg = (
+                "An error occurred in the current transaction. You can't "
+                "execute queries until the end of the 'atomic' block."
+            )
+            with self.assertRaisesMessage(transaction.TransactionManagementError, msg):
                 r2.save(force_update=True)
         self.assertEqual(Reporter.objects.get(pk=r1.pk).last_name, "Haddock")
 

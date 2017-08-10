@@ -1,6 +1,8 @@
-=============================================
-Django 1.11 release notes - UNDER DEVELOPMENT
-=============================================
+=========================
+Django 1.11 release notes
+=========================
+
+*April 4, 2017*
 
 Welcome to Django 1.11!
 
@@ -133,6 +135,8 @@ Minor features
 * The new ``post_reset_login`` attribute for
   :class:`~django.contrib.auth.views.PasswordResetConfirmView` allows
   automatically logging in a user after a successful password reset.
+  If you have multiple ``AUTHENTICATION_BACKENDS`` configured, use the
+  ``post_reset_login_backend`` attribute to choose which one to use.
 
 * To avoid the possibility of leaking a password reset token via the HTTP
   Referer header (for example, if the reset page includes a reference to CSS or
@@ -234,9 +238,9 @@ Minor features
 * The new :class:`~django.contrib.postgres.aggregates.JSONBAgg` allows
   aggregating values as a JSON array.
 
-* :class:`~django.contrib.postgres.fields.HStoreField` and
-  :class:`~django.contrib.postgres.forms.HStoreField` allow storing null
-  values.
+* The :class:`~django.contrib.postgres.fields.HStoreField` (model field) and
+  :class:`~django.contrib.postgres.forms.HStoreField` (form field) allow
+  storing null values.
 
 Cache
 ~~~~~
@@ -275,6 +279,8 @@ Database backends
   :setting:`OPTIONS` to allow specifying the :ref:`transaction isolation level
   <mysql-isolation-level>`. To avoid possible data loss, it's recommended to
   switch from MySQL's default level, repeatable read, to read committed.
+
+* Added support for ``cx_Oracle`` 5.3.
 
 Email
 ~~~~~
@@ -336,6 +342,7 @@ Models
 
 * :class:`~django.db.models.ImageField` now has a default
   :data:`~django.core.validators.validate_image_file_extension` validator.
+  (This validator moved to the form field in :doc:`Django 1.11.2 <1.11.2>`.)
 
 * Added support for time truncation to
   :class:`~django.db.models.functions.datetime.Trunc` functions.
@@ -465,11 +472,20 @@ Backwards incompatible changes in 1.11
 * The OpenLayers-based form widgets now use OpenLayers 3, and the
   ``gis/openlayers.html`` and ``gis/openlayers-osm.html`` templates have been
   updated. Check your project if you subclass these widgets or extend the
-  templates.
+  templates. Also, the new widgets work a bit differently than the old ones.
+  Instead of using a toolbar in the widget, you click to draw, click and drag
+  to move the map, and click and drag a point/vertex/corner to move it.
 
 * Support for SpatiaLite < 4.0 is dropped.
 
 * Support for GDAL 1.7 and 1.8 is dropped.
+
+* The widgets in ``contrib.gis.forms.widgets`` and the admin's
+  ``OpenLayersWidget`` use the :doc:`form rendering API </ref/forms/renderers>`
+  rather than ``loader.render_to_string()``. If you're using a custom widget
+  template, you'll need to be sure your form renderer can locate it. For
+  example, you could use the :class:`~django.forms.renderers.TemplatesSetting`
+  renderer.
 
 :mod:`django.contrib.staticfiles`
 ---------------------------------
@@ -488,6 +504,9 @@ Backwards incompatible changes in 1.11
 
 Database backend API
 --------------------
+
+This section describes changes that may be needed in third-party database
+backends.
 
 * The ``DatabaseOperations.time_trunc_sql()`` method is added to support
   ``TimeField`` truncation. It accepts a ``lookup_type`` and ``field_name``
@@ -530,6 +549,11 @@ Django 1.11 sets PostgreSQL 9.3 as the minimum version it officially supports.
 Support for PostGIS 2.0 is also removed as PostgreSQL 9.2 is the last version
 to support it.
 
+Also, the minimum supported version of psycopg2 is increased from 2.4.5 to
+2.5.4.
+
+.. _liveservertestcase-port-zero-change:
+
 ``LiveServerTestCase`` binds to port zero
 -----------------------------------------
 
@@ -538,6 +562,9 @@ Rather than taking a port range and iterating to find a free port,
 to assign a free port. The ``DJANGO_LIVE_TEST_SERVER_ADDRESS`` environment
 variable is no longer used, and as it's also no longer used, the
 ``manage.py test --liveserver`` option is removed.
+
+If you need to bind ``LiveServerTestCase`` to a specific port, use the ``port``
+attribute added in Django 1.11.2.
 
 Protection against insecure redirects in :mod:`django.contrib.auth` and ``i18n`` views
 --------------------------------------------------------------------------------------
@@ -597,6 +624,8 @@ Some undocumented classes in ``django.forms.widgets`` are removed:
   ``CheckboxFieldRenderer``
 * ``ChoiceInput``, ``RadioChoiceInput``, ``CheckboxChoiceInput``
 
+The undocumented ``Select.render_option()`` method is removed.
+
 The ``Widget.format_output()`` method is removed. Use a custom widget template
 instead.
 
@@ -605,14 +634,15 @@ Some widget values, such as ``<select>`` options, are now localized if
 widget templates that uses the :ttag:`localize` template tag to turn off
 localization.
 
-``django.Template.render()`` prohibits non-dict context
--------------------------------------------------------
+``django.template.backends.django.Template.render()`` prohibits non-dict context
+--------------------------------------------------------------------------------
 
-For compatibility with multiple template engines, ``django.Template.render()``
-must receive a dictionary of context rather than ``Context`` or
-``RequestContext``. If you were passing either of the two classes, pass a
-dictionary instead -- doing so is backwards-compatible with older versions of
-Django.
+For compatibility with multiple template engines,
+``django.template.backends.django.Template.render()`` (returned from high-level
+template loader APIs such as ``loader.get_template()``) must receive a
+dictionary of context rather than ``Context`` or ``RequestContext``. If you
+were passing either of the two classes, pass a dictionary instead -- doing so
+is backwards-compatible with older versions of Django.
 
 Model state changes in migration operations
 -------------------------------------------
@@ -734,6 +764,15 @@ Miscellaneous
 * Support for ``cx_Oracle`` < 5.2 is removed.
 
 * Support for IPython < 1.0 is removed from the ``shell`` command.
+
+* The signature of private API ``Widget.build_attrs()`` changed from
+  ``extra_attrs=None, **kwargs`` to ``base_attrs, extra_attrs=None``.
+
+* File-like objects (e.g., :class:`~io.StringIO` and :class:`~io.BytesIO`)
+  uploaded to an :class:`~django.db.models.ImageField` using the test client
+  now require a ``name`` attribute with a value that passes the
+  :data:`~django.core.validators.validate_image_file_extension` validator.
+  See the note in :meth:`.Client.post`.
 
 .. _deprecated-features-1.11:
 

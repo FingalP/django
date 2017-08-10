@@ -2,7 +2,7 @@
  This module contains the 'base' GEOSGeometry object -- all GEOS Geometries
  inherit from this object.
 """
-import json
+import re
 from ctypes import addressof, byref, c_double
 
 from django.contrib.gis import gdal
@@ -46,6 +46,7 @@ class GEOSGeometry(GEOSBase, ListMixin):
         The `srid` keyword is used to specify the Source Reference Identifier
         (SRID) number for this Geometry.  If not set, the SRID will be None.
         """
+        input_srid = None
         if isinstance(geo_input, bytes):
             geo_input = force_text(geo_input)
         if isinstance(geo_input, str):
@@ -53,14 +54,16 @@ class GEOSGeometry(GEOSBase, ListMixin):
             if wkt_m:
                 # Handling WKT input.
                 if wkt_m.group('srid'):
-                    srid = int(wkt_m.group('srid'))
-                g = wkt_r().read(force_bytes(wkt_m.group('wkt')))
+                    input_srid = int(wkt_m.group('srid'))
+                g = self._from_wkt(force_bytes(wkt_m.group('wkt')))
             elif hex_regex.match(geo_input):
                 # Handling HEXEWKB input.
                 g = wkb_r().read(force_bytes(geo_input))
             elif json_regex.match(geo_input):
                 # Handling GeoJSON input.
-                g = wkb_r().read(gdal.OGRGeometry(geo_input).wkb)
+                ogr = gdal.OGRGeometry.from_json(geo_input)
+                g = ogr._geos_ptr()
+                input_srid = ogr.srid
             else:
                 raise ValueError('String input unrecognized as WKT EWKT, and HEXEWKB.')
         elif isinstance(geo_input, GEOM_PTR):
@@ -75,14 +78,17 @@ class GEOSGeometry(GEOSBase, ListMixin):
             # Invalid geometry type.
             raise TypeError('Improper geometry input type: %s' % type(geo_input))
 
-        if g:
-            # Setting the pointer object with a valid pointer.
-            self.ptr = g
-        else:
+        if not g:
             raise GEOSException('Could not initialize GEOS Geometry with given input.')
 
+        input_srid = input_srid or capi.geos_get_srid(g) or None
+        if input_srid and srid and input_srid != srid:
+            raise ValueError('Input geometry already has SRID: %d.' % input_srid)
+
+        # Setting the pointer object with a valid pointer.
+        self.ptr = g
         # Post-initialization setup.
-        self._post_init(srid)
+        self._post_init(input_srid or srid)
 
     def _post_init(self, srid):
         "Perform post-initialization setup."
@@ -158,6 +164,27 @@ class GEOSGeometry(GEOSBase, ListMixin):
     def _from_wkb(cls, wkb):
         return wkb_r().read(wkb)
 
+    @staticmethod
+    def from_ewkt(ewkt):
+        ewkt = force_bytes(ewkt)
+        srid = None
+        parts = ewkt.split(b';', 1)
+        if len(parts) == 2:
+            srid_part, wkt = parts
+            match = re.match(b'SRID=(?P<srid>\-?\d+)', srid_part)
+            if not match:
+                raise ValueError('EWKT has invalid SRID part.')
+            srid = int(match.group('srid'))
+        else:
+            wkt = ewkt
+        if not wkt:
+            raise ValueError('Expected WKT but got an empty string.')
+        return GEOSGeometry(GEOSGeometry._from_wkt(wkt), srid=srid)
+
+    @staticmethod
+    def _from_wkt(wkt):
+        return wkt_r().read(wkt)
+
     @classmethod
     def from_gml(cls, gml_string):
         return gdal.OGRGeometry.from_gml(gml_string).geos
@@ -169,13 +196,11 @@ class GEOSGeometry(GEOSBase, ListMixin):
         or an EWKT representation.
         """
         if isinstance(other, str):
-            if other.startswith('SRID=0;'):
-                return self.ewkt == other[7:]  # Test only WKT part of other
-            return self.ewkt == other
-        elif isinstance(other, GEOSGeometry):
-            return self.srid == other.srid and self.equals_exact(other)
-        else:
-            return False
+            try:
+                other = GEOSGeometry.from_ewkt(other)
+            except (ValueError, GEOSException):
+                return False
+        return isinstance(other, GEOSGeometry) and self.srid == other.srid and self.equals_exact(other)
 
     # ### Geometry set-like operations ###
     # Thanks to Sean Gillies for inspiration:
@@ -415,7 +440,7 @@ class GEOSGeometry(GEOSBase, ListMixin):
         """
         Return GeoJSON representation of this Geometry.
         """
-        return json.dumps({'type': self.__class__.__name__, 'coordinates': self.coords})
+        return self.ogr.json
     geojson = json
 
     @property

@@ -295,7 +295,7 @@ databases::
 Now we'll need to handle routing. First we want a router that knows to
 send queries for the ``auth`` app to ``auth_db``::
 
-    class AuthRouter(object):
+    class AuthRouter:
         """
         A router to control all database operations on models in the
         auth application.
@@ -340,7 +340,7 @@ from::
 
     import random
 
-    class PrimaryReplicaRouter(object):
+    class PrimaryReplicaRouter:
         def db_for_read(self, model, **hints):
             """
             Reads go to a randomly-chosen replica.
@@ -549,7 +549,7 @@ solution is to use ``db_manager()``, like this::
 ``db_manager()`` returns a copy of the manager bound to the database you specify.
 
 Using ``get_queryset()`` with multiple databases
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you're overriding ``get_queryset()`` on your manager, be sure to
 either call the method on the parent (using ``super()``) or do the

@@ -100,9 +100,18 @@ class UserCreationForm(forms.ModelForm):
                 self.error_messages['password_mismatch'],
                 code='password_mismatch',
             )
-        self.instance.username = self.cleaned_data.get('username')
-        password_validation.validate_password(self.cleaned_data.get('password2'), self.instance)
         return password2
+
+    def _post_clean(self):
+        super()._post_clean()
+        # Validate the password after self.instance is updated with form data
+        # by super().
+        password = self.cleaned_data.get('password2')
+        if password:
+            try:
+                password_validation.validate_password(password, self.instance)
+            except forms.ValidationError as error:
+                self.add_error('password2', error)
 
     def save(self, commit=True):
         user = super().save(commit=False)
@@ -118,7 +127,7 @@ class UserChangeForm(forms.ModelForm):
         help_text=_(
             "Raw passwords are not stored, so there is no way to see this "
             "user's password, but you can change the password using "
-            "<a href=\"../password/\">this form</a>."
+            "<a href=\"{}\">this form</a>."
         ),
     )
 
@@ -129,6 +138,7 @@ class UserChangeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['password'].help_text = self.fields['password'].help_text.format('../password/')
         f = self.fields.get('user_permissions')
         if f is not None:
             f.queryset = f.queryset.select_related('content_type')
@@ -409,7 +419,7 @@ class AdminPasswordChangeForm(forms.Form):
     @property
     def changed_data(self):
         data = super().changed_data
-        for name in self.fields.keys():
+        for name in self.fields:
             if name not in data:
                 return []
         return ['password']

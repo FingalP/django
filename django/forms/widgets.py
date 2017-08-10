@@ -5,6 +5,8 @@ HTML Widget classes
 import copy
 import datetime
 import re
+import warnings
+from contextlib import suppress
 from itertools import chain
 
 from django.conf import settings
@@ -12,7 +14,6 @@ from django.forms.utils import to_current_timezone
 from django.templatetags.static import static
 from django.utils import datetime_safe, formats
 from django.utils.dates import MONTHS
-from django.utils.encoding import force_text
 from django.utils.formats import get_format
 from django.utils.html import format_html, html_safe
 from django.utils.safestring import mark_safe
@@ -33,25 +34,29 @@ __all__ = (
 MEDIA_TYPES = ('css', 'js')
 
 
+class MediaOrderConflictWarning(RuntimeWarning):
+    pass
+
+
 @html_safe
 class Media:
-    def __init__(self, media=None, **kwargs):
-        if media:
-            media_attrs = media.__dict__
+    def __init__(self, media=None, css=None, js=None):
+        if media is not None:
+            css = getattr(media, 'css', {})
+            js = getattr(media, 'js', [])
         else:
-            media_attrs = kwargs
-
-        self._css = {}
-        self._js = []
-
-        for name in MEDIA_TYPES:
-            getattr(self, 'add_' + name)(media_attrs.get(name))
+            if css is None:
+                css = {}
+            if js is None:
+                js = []
+        self._css = css
+        self._js = js
 
     def __str__(self):
         return self.render()
 
     def render(self):
-        return mark_safe('\n'.join(chain(*[getattr(self, 'render_' + name)() for name in MEDIA_TYPES])))
+        return mark_safe('\n'.join(chain.from_iterable(getattr(self, 'render_' + name)() for name in MEDIA_TYPES)))
 
     def render_js(self):
         return [
@@ -64,13 +69,13 @@ class Media:
     def render_css(self):
         # To keep rendering order consistent, we can't just iterate over items().
         # We need to sort the keys, and iterate over the sorted list.
-        media = sorted(self._css.keys())
-        return chain(*[[
+        media = sorted(self._css)
+        return chain.from_iterable([
             format_html(
                 '<link href="{}" type="text/css" media="{}" rel="stylesheet" />',
                 self.absolute_path(path), medium
             ) for path in self._css[medium]
-        ] for medium in media])
+        ] for medium in media)
 
     def absolute_path(self, path):
         """
@@ -88,24 +93,48 @@ class Media:
             return Media(**{str(name): getattr(self, '_' + name)})
         raise KeyError('Unknown media type "%s"' % name)
 
-    def add_js(self, data):
-        if data:
-            for path in data:
-                if path not in self._js:
-                    self._js.append(path)
+    @staticmethod
+    def merge(list_1, list_2):
+        """
+        Merge two lists while trying to keep the relative order of the elements.
+        Warn if the lists have the same two elements in a different relative
+        order.
 
-    def add_css(self, data):
-        if data:
-            for medium, paths in data.items():
-                for path in paths:
-                    if not self._css.get(medium) or path not in self._css[medium]:
-                        self._css.setdefault(medium, []).append(path)
+        For static assets it can be important to have them included in the DOM
+        in a certain order. In JavaScript you may not be able to reference a
+        global or in CSS you might want to override a style.
+        """
+        # Start with a copy of list_1.
+        combined_list = list(list_1)
+        last_insert_index = len(list_1)
+        # Walk list_2 in reverse, inserting each element into combined_list if
+        # it doesn't already exist.
+        for path in reversed(list_2):
+            try:
+                # Does path already exist in the list?
+                index = combined_list.index(path)
+            except ValueError:
+                # Add path to combined_list since it doesn't exist.
+                combined_list.insert(last_insert_index, path)
+            else:
+                if index > last_insert_index:
+                    warnings.warn(
+                        'Detected duplicate Media files in an opposite order:\n'
+                        '%s\n%s' % (combined_list[last_insert_index], combined_list[index]),
+                        MediaOrderConflictWarning,
+                    )
+                # path already exists in the list. Update last_insert_index so
+                # that the following elements are inserted in front of this one.
+                last_insert_index = index
+        return combined_list
 
     def __add__(self, other):
         combined = Media()
-        for name in MEDIA_TYPES:
-            getattr(combined, 'add_' + name)(getattr(self, '_' + name, None))
-            getattr(combined, 'add_' + name)(getattr(other, '_' + name, None))
+        combined._js = self.merge(self._js, other._js)
+        combined._css = {
+            medium: self.merge(self._css.get(medium, []), other._css.get(medium, []))
+            for medium in self._css.keys() | other._css.keys()
+        }
         return combined
 
 
@@ -180,13 +209,13 @@ class Widget(metaclass=MediaDefiningClass):
         """
         Return a value as it should appear when rendered in a template.
         """
-        if value is None:
-            value = ''
+        if value == '' or value is None:
+            return None
         if self.is_localized:
             return formats.localize_input(value)
-        return force_text(value)
+        return str(value)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = {}
         context['widget'] = {
             'name': name,
@@ -254,7 +283,7 @@ class Input(Widget):
             self.input_type = attrs.pop('type', self.input_type)
         super().__init__(attrs)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         context['widget']['type'] = self.input_type
         return context
@@ -306,7 +335,7 @@ class MultipleHiddenInput(HiddenInput):
     """
     template_name = 'django/forms/widgets/multiple_hidden.html'
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         final_attrs = context['widget']['attrs']
         id_ = context['widget']['attrs'].get('id')
@@ -388,11 +417,11 @@ class ClearableFileInput(FileInput):
         if self.is_initial(value):
             return value
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         checkbox_name = self.clear_checkbox_name(name)
         checkbox_id = self.clear_checkbox_id(checkbox_name)
-        context.update({
+        context['widget'].update({
             'checkbox_name': checkbox_name,
             'checkbox_id': checkbox_id,
             'is_initial': self.is_initial(value),
@@ -483,9 +512,9 @@ class CheckboxInput(Input):
         """Only return the 'value' attribute if value isn't empty."""
         if value is True or value is False or value is None or value == '':
             return
-        return force_text(value)
+        return str(value)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         if self.check_test(value):
             if attrs is None:
                 attrs = {}
@@ -548,36 +577,34 @@ class ChoiceWidget(Widget):
 
     def optgroups(self, name, value, attrs=None):
         """Return a list of optgroups for this widget."""
-        default = (None, [], 0)
-        groups = [default]
+        groups = []
         has_selected = False
 
-        for option_value, option_label in chain(self.choices):
+        for index, (option_value, option_label) in enumerate(chain(self.choices)):
             if option_value is None:
                 option_value = ''
 
+            subgroup = []
             if isinstance(option_label, (list, tuple)):
-                index = groups[-1][2] + 1
+                group_name = option_value
                 subindex = 0
-                subgroup = []
-                groups.append((option_value, subgroup, index))
                 choices = option_label
             else:
-                index = len(default[1])
-                subgroup = default[1]
+                group_name = None
                 subindex = None
                 choices = [(option_value, option_label)]
+            groups.append((group_name, subgroup, index))
 
             for subvalue, sublabel in choices:
                 selected = (
-                    force_text(subvalue) in value and
-                    (has_selected is False or self.allow_multiple_selected)
+                    str(subvalue) in value and
+                    (not has_selected or self.allow_multiple_selected)
                 )
-                if selected is True and has_selected is False:
+                if selected and not has_selected:
                     has_selected = True
                 subgroup.append(self.create_option(
-                    name, subvalue, sublabel, selected, index, subindex,
-                    attrs=attrs,
+                    name, subvalue, sublabel, selected, index,
+                    subindex=subindex, attrs=attrs,
                 ))
                 if subindex is not None:
                     subindex += 1
@@ -603,7 +630,7 @@ class ChoiceWidget(Widget):
             'template_name': self.option_template_name,
         }
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         context['widget']['optgroups'] = self.optgroups(name, context['widget']['value'], attrs)
         context['wrap_label'] = True
@@ -621,23 +648,15 @@ class ChoiceWidget(Widget):
     def value_from_datadict(self, data, files, name):
         getter = data.get
         if self.allow_multiple_selected:
-            try:
+            with suppress(AttributeError):
                 getter = data.getlist
-            except AttributeError:
-                pass
         return getter(name)
 
     def format_value(self, value):
-        """Return selected values as a set."""
+        """Return selected values as a list."""
         if not isinstance(value, (tuple, list)):
             value = [value]
-        values = set()
-        for v in value:
-            if v is None:
-                values.add('')
-            else:
-                values.add(force_text(v))
-        return values
+        return [str(v) if v is not None else '' for v in value]
 
 
 class Select(ChoiceWidget):
@@ -648,7 +667,7 @@ class Select(ChoiceWidget):
     checked_attribute = {'selected': True}
     option_inherits_attrs = False
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         if self.allow_multiple_selected:
             context['widget']['attrs']['multiple'] = 'multiple'
@@ -714,6 +733,11 @@ class SelectMultiple(Select):
             getter = data.get
         return getter(name)
 
+    def value_omitted_from_data(self, data, files, name):
+        # An unselected <select multiple> doesn't appear in POST data, so it's
+        # never known if the value is actually omitted.
+        return False
+
 
 class RadioSelect(ChoiceWidget):
     input_type = 'radio'
@@ -767,7 +791,7 @@ class MultiWidget(Widget):
     def is_hidden(self):
         return all(w.is_hidden for w in self.widgets)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         if self.is_localized:
             for widget in self.widgets:
@@ -894,7 +918,7 @@ class SelectDateWidget(Widget):
     template_name = 'django/forms/widgets/select_date.html'
     input_type = 'select'
     select_widget = Select
-    date_re = re.compile(r'(\d{4})-(\d\d?)-(\d\d?)$')
+    date_re = re.compile(r'(\d{4}|0)-(\d\d?)-(\d\d?)$')
 
     def __init__(self, attrs=None, years=None, months=None, empty_label=None):
         self.attrs = attrs or {}
@@ -928,11 +952,11 @@ class SelectDateWidget(Widget):
             self.month_none_value = self.none_value
             self.day_none_value = self.none_value
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         date_context = {}
         year_choices = [(i, i) for i in self.years]
-        if self.is_required is False:
+        if not self.is_required:
             year_choices.insert(0, self.year_none_value)
         year_attrs = context['widget']['attrs'].copy()
         year_name = self.year_field % name
@@ -943,7 +967,7 @@ class SelectDateWidget(Widget):
             attrs=year_attrs,
         )
         month_choices = list(self.months.items())
-        if self.is_required is False:
+        if not self.is_required:
             month_choices.insert(0, self.month_none_value)
         month_attrs = context['widget']['attrs'].copy()
         month_name = self.month_field % name
@@ -954,7 +978,7 @@ class SelectDateWidget(Widget):
             attrs=month_attrs,
         )
         day_choices = [(i, i) for i in range(1, 32)]
-        if self.is_required is False:
+        if not self.is_required:
             day_choices.insert(0, self.day_none_value)
         day_attrs = context['widget']['attrs'].copy()
         day_name = self.day_field % name
@@ -981,12 +1005,13 @@ class SelectDateWidget(Widget):
             year, month, day = value.year, value.month, value.day
         elif isinstance(value, str):
             if settings.USE_L10N:
+                input_format = get_format('DATE_INPUT_FORMATS')[0]
                 try:
-                    input_format = get_format('DATE_INPUT_FORMATS')[0]
                     d = datetime.datetime.strptime(value, input_format)
-                    year, month, day = d.year, d.month, d.day
                 except ValueError:
                     pass
+                else:
+                    year, month, day = d.year, d.month, d.day
             match = self.date_re.match(value)
             if match:
                 year, month, day = [int(val) for val in match.groups()]
@@ -1011,8 +1036,7 @@ class SelectDateWidget(Widget):
     def id_for_label(self, id_):
         for first_select in self._parse_date_fmt():
             return '%s_%s' % (id_, first_select)
-        else:
-            return '%s_month' % id_
+        return '%s_month' % id_
 
     def value_from_datadict(self, data, files, name):
         y = data.get(self.year_field % name)

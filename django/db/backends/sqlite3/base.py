@@ -2,6 +2,7 @@
 SQLite3 backend for the sqlite3 module in the standard library.
 """
 import decimal
+import math
 import re
 import warnings
 from sqlite3 import dbapi2 as Database
@@ -16,7 +17,6 @@ from django.utils import timezone
 from django.utils.dateparse import (
     parse_date, parse_datetime, parse_duration, parse_time,
 )
-from django.utils.encoding import force_text
 
 from .client import DatabaseClient                          # isort:skip
 from .creation import DatabaseCreation                      # isort:skip
@@ -33,7 +33,7 @@ def decoder(conv_func):
     return lambda s: conv_func(s.decode())
 
 
-Database.register_converter("bool", decoder(lambda s: s == '1'))
+Database.register_converter("bool", lambda s: s == b'1')
 Database.register_converter("time", decoder(parse_time))
 Database.register_converter("date", decoder(parse_date))
 Database.register_converter("datetime", decoder(parse_datetime))
@@ -46,6 +46,7 @@ Database.register_adapter(decimal.Decimal, backend_utils.rev_typecast_decimal)
 
 class DatabaseWrapper(BaseDatabaseWrapper):
     vendor = 'sqlite'
+    display_name = 'SQLite'
     # SQLite doesn't actually support most of these types, but it "does the right
     # thing" given more verbose field definitions, so leave them as is so that
     # schema inspection is more useful.
@@ -172,6 +173,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         conn.create_function("regexp", 2, _sqlite_regexp)
         conn.create_function("django_format_dtdelta", 3, _sqlite_format_dtdelta)
         conn.create_function("django_power", 2, _sqlite_power)
+        conn.execute('PRAGMA foreign_keys = ON')
         return conn
 
     def init_connection_state(self):
@@ -211,6 +213,16 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         # SQLite always runs at the SERIALIZABLE isolation level.
         with self.wrap_database_errors:
             self.connection.isolation_level = level
+
+    def disable_constraint_checking(self):
+        if self.in_atomic_block:
+            # sqlite3 cannot disable constraint checking inside a transaction.
+            return False
+        self.cursor().execute('PRAGMA foreign_keys = OFF')
+        return True
+
+    def enable_constraint_checking(self):
+        self.cursor().execute('PRAGMA foreign_keys = ON')
 
     def check_constraints(self, table_names=None):
         """
@@ -309,6 +321,8 @@ def _sqlite_date_extract(lookup_type, dt):
         return (dt.isoweekday() % 7) + 1
     elif lookup_type == 'week':
         return dt.isocalendar()[1]
+    elif lookup_type == 'quarter':
+        return math.ceil(dt.month / 3)
     else:
         return getattr(dt, lookup_type)
 
@@ -320,6 +334,9 @@ def _sqlite_date_trunc(lookup_type, dt):
         return None
     if lookup_type == 'year':
         return "%i-01-01" % dt.year
+    elif lookup_type == 'quarter':
+        month_in_quarter = dt.month - (dt.month - 1) % 3
+        return '%i-%02i-01' % (dt.year, month_in_quarter)
     elif lookup_type == 'month':
         return "%i-%02i-01" % (dt.year, dt.month)
     elif lookup_type == 'day':
@@ -373,6 +390,8 @@ def _sqlite_datetime_extract(lookup_type, dt, tzname):
         return (dt.isoweekday() % 7) + 1
     elif lookup_type == 'week':
         return dt.isocalendar()[1]
+    elif lookup_type == 'quarter':
+        return math.ceil(dt.month / 3)
     else:
         return getattr(dt, lookup_type)
 
@@ -383,6 +402,9 @@ def _sqlite_datetime_trunc(lookup_type, dt, tzname):
         return None
     if lookup_type == 'year':
         return "%i-01-01 00:00:00" % dt.year
+    elif lookup_type == 'quarter':
+        month_in_quarter = dt.month - (dt.month - 1) % 3
+        return '%i-%02i-01 00:00:00' % (dt.year, month_in_quarter)
     elif lookup_type == 'month':
         return "%i-%02i-01 00:00:00" % (dt.year, dt.month)
     elif lookup_type == 'day':
@@ -456,7 +478,7 @@ def _sqlite_timestamp_diff(lhs, rhs):
 
 
 def _sqlite_regexp(re_pattern, re_string):
-    return bool(re.search(re_pattern, force_text(re_string))) if re_string is not None else False
+    return bool(re.search(re_pattern, str(re_string))) if re_string is not None else False
 
 
 def _sqlite_power(x, y):

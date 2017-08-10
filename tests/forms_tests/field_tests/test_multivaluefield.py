@@ -29,18 +29,15 @@ class ComplexMultiWidget(MultiWidget):
             ]
         return [None, None, None]
 
-    def format_output(self, rendered_widgets):
-        return '\n'.join(rendered_widgets)
-
 
 class ComplexField(MultiValueField):
-    def __init__(self, required=True, widget=None, label=None, initial=None):
+    def __init__(self, **kwargs):
         fields = (
             CharField(),
             MultipleChoiceField(choices=beatles),
             SplitDateTimeField(),
         )
-        super().__init__(fields, required, widget, label, initial)
+        super().__init__(fields, **kwargs)
 
     def compress(self, data_list):
         if data_list:
@@ -105,6 +102,10 @@ class MultiValueFieldTest(SimpleTestCase):
             'some text,JP,2007-04-25 06:24:00',
             ['some text', ['J', 'P'], ['2009-04-25', '11:44:00']],
         ))
+
+    def test_disabled_has_changed(self):
+        f = MultiValueField(fields=(CharField(), CharField()), disabled=True)
+        self.assertIs(f.has_changed(['x', 'x'], ['y', 'y']), False)
 
     def test_form_as_table(self):
         form = ComplexFieldForm()

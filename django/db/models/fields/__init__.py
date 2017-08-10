@@ -25,7 +25,7 @@ from django.utils.dateparse import (
     parse_date, parse_datetime, parse_duration, parse_time,
 )
 from django.utils.duration import duration_string
-from django.utils.encoding import force_bytes, force_text, smart_text
+from django.utils.encoding import force_bytes, smart_text
 from django.utils.functional import Promise, cached_property, curry
 from django.utils.ipv6 import clean_ipv6_address
 from django.utils.itercompat import is_iterable
@@ -191,7 +191,7 @@ class Field(RegisterLookupMixin):
 
     def __repr__(self):
         """Display the module, class, and name of the field."""
-        path = '%s.%s' % (self.__class__.__module__, self.__class__.__name__)
+        path = '%s.%s' % (self.__class__.__module__, self.__class__.__qualname__)
         name = getattr(self, 'name', None)
         if name is not None:
             return '<%s: %s>' % (path, name)
@@ -204,6 +204,7 @@ class Field(RegisterLookupMixin):
         errors.extend(self._check_db_index())
         errors.extend(self._check_null_allowed_for_primary_keys())
         errors.extend(self._check_backend_specific_checks(**kwargs))
+        errors.extend(self._check_validators())
         errors.extend(self._check_deprecation_details())
         return errors
 
@@ -301,6 +302,25 @@ class Field(RegisterLookupMixin):
             if router.allow_migrate(db, app_label, model_name=self.model._meta.model_name):
                 return connections[db].validation.check_field(self, **kwargs)
         return []
+
+    def _check_validators(self):
+        errors = []
+        for i, validator in enumerate(self.validators):
+            if not callable(validator):
+                errors.append(
+                    checks.Error(
+                        "All 'validators' must be callable.",
+                        hint=(
+                            "validators[{i}] ({repr}) isn't a function or "
+                            "instance of a validator class.".format(
+                                i=i, repr=repr(validator),
+                            )
+                        ),
+                        obj=self,
+                        id='fields.E008',
+                    )
+                )
+        return errors
 
     def _check_deprecation_details(self):
         if self.system_check_removed_details is not None:
@@ -428,7 +448,7 @@ class Field(RegisterLookupMixin):
                 if value is not default:
                     keywords[name] = value
         # Work out path - we shorten it for known Django core fields
-        path = "%s.%s" % (self.__class__.__module__, self.__class__.__name__)
+        path = "%s.%s" % (self.__class__.__module__, self.__class__.__qualname__)
         if path.startswith("django.db.models.fields.related"):
             path = path.replace("django.db.models.fields.related", "django.db.models")
         if path.startswith("django.db.models.fields.files"):
@@ -494,7 +514,11 @@ class Field(RegisterLookupMixin):
             # instance. The code below will create a new empty instance of
             # class self.__class__, then update its dict with self.__dict__
             # values - so, this is very close to normal pickle.
-            return _empty, (self.__class__,), self.__dict__
+            state = self.__dict__.copy()
+            # The _get_default cached_property can't be pickled due to lambda
+            # usage.
+            state.pop('_get_default', None)
+            return _empty, (self.__class__,), state
         return _load_field, (self.model._meta.app_label, self.model._meta.object_name,
                              self.name)
 
@@ -583,13 +607,16 @@ class Field(RegisterLookupMixin):
         self.run_validators(value)
         return value
 
+    def db_type_parameters(self, connection):
+        return DictWrapper(self.__dict__, connection.ops.quote_name, 'qn_')
+
     def db_check(self, connection):
         """
         Return the database column check constraint for this field, for the
         provided connection. Works the same way as db_type() for the case that
         get_internal_type() does not map to a preexisting model field.
         """
-        data = DictWrapper(self.__dict__, connection.ops.quote_name, "qn_")
+        data = self.db_type_parameters(connection)
         try:
             return connection.data_type_check_constraints[self.get_internal_type()] % data
         except KeyError:
@@ -615,7 +642,7 @@ class Field(RegisterLookupMixin):
         # mapped to one of the built-in Django field types. In this case, you
         # can implement db_type() instead of get_internal_type() to specify
         # exactly which wacky database column type you want to use.
-        data = DictWrapper(self.__dict__, connection.ops.quote_name, "qn_")
+        data = self.db_type_parameters(connection)
         try:
             return connection.data_types[self.get_internal_type()] % data
         except KeyError:
@@ -627,6 +654,13 @@ class Field(RegisterLookupMixin):
         use. For example, this method is called by ForeignKey and OneToOneField
         to determine its data type.
         """
+        return self.db_type(connection)
+
+    def cast_db_type(self, connection):
+        """Return the data type to use in the Cast() function."""
+        db_type = connection.ops.cast_data_types.get(self.get_internal_type())
+        if db_type:
+            return db_type % self.db_type_parameters(connection)
         return self.db_type(connection)
 
     def db_parameters(self, connection):
@@ -775,7 +809,7 @@ class Field(RegisterLookupMixin):
                    for x in rel_model._default_manager.complex_filter(
                        limit_choices_to)]
         else:
-            lst = [(x._get_pk_val(), smart_text(x))
+            lst = [(x.pk, smart_text(x))
                    for x in rel_model._default_manager.complex_filter(
                        limit_choices_to)]
         return first_choice + lst
@@ -785,7 +819,7 @@ class Field(RegisterLookupMixin):
         Return a string value of this field from the passed obj.
         This is used by the serialization framework.
         """
-        return force_text(self.value_from_object(obj))
+        return str(self.value_from_object(obj))
 
     def _get_flatchoices(self):
         """Flattened version of choices tuple."""
@@ -830,7 +864,7 @@ class Field(RegisterLookupMixin):
             for k in list(kwargs):
                 if k not in ('coerce', 'empty_value', 'choices', 'required',
                              'widget', 'label', 'initial', 'help_text',
-                             'error_messages', 'show_hidden_initial'):
+                             'error_messages', 'show_hidden_initial', 'disabled'):
                     del kwargs[k]
         defaults.update(kwargs)
         if form_class is None:
@@ -1020,7 +1054,8 @@ class CharField(Field):
                     id='fields.E120',
                 )
             ]
-        elif not isinstance(self.max_length, int) or self.max_length <= 0:
+        elif (not isinstance(self.max_length, int) or isinstance(self.max_length, bool) or
+                self.max_length <= 0):
             return [
                 checks.Error(
                     "'max_length' must be a positive integer.",
@@ -1031,13 +1066,18 @@ class CharField(Field):
         else:
             return []
 
+    def cast_db_type(self, connection):
+        if self.max_length is None:
+            return connection.ops.cast_char_field_without_max_length
+        return super().cast_db_type(connection)
+
     def get_internal_type(self):
         return "CharField"
 
     def to_python(self, value):
         if isinstance(value, str) or value is None:
             return value
-        return force_text(value)
+        return str(value)
 
     def get_prep_value(self, value):
         value = super().get_prep_value(value)
@@ -1487,6 +1527,10 @@ class DecimalField(Field):
             validators.DecimalValidator(self.max_digits, self.decimal_places)
         ]
 
+    @cached_property
+    def context(self):
+        return decimal.Context(prec=self.max_digits)
+
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
         if self.max_digits is not None:
@@ -1501,6 +1545,8 @@ class DecimalField(Field):
     def to_python(self, value):
         if value is None:
             return value
+        if isinstance(value, float):
+            return self.context.create_decimal_from_float(value)
         try:
             return decimal.Decimal(value)
         except decimal.InvalidOperation:
@@ -1509,12 +1555,6 @@ class DecimalField(Field):
                 code='invalid',
                 params={'value': value},
             )
-
-    def _format(self, value):
-        if isinstance(value, str):
-            return value
-        else:
-            return self.format_number(value)
 
     def format_number(self, value):
         """
@@ -1899,7 +1939,7 @@ class GenericIPAddressField(Field):
         if value is None:
             return None
         if not isinstance(value, str):
-            value = force_text(value)
+            value = str(value)
         value = value.strip()
         if ':' in value:
             return clean_ipv6_address(value, self.unpack_ipv4, self.error_messages['invalid'])
@@ -2068,7 +2108,7 @@ class TextField(Field):
     def to_python(self, value):
         if isinstance(value, str) or value is None:
             return value
-        return force_text(value)
+        return str(value)
 
     def get_prep_value(self, value):
         value = super().get_prep_value(value)
@@ -2078,7 +2118,9 @@ class TextField(Field):
         # Passing max_length to forms.CharField means that the value's length
         # will be validated twice. This is considered acceptable since we want
         # the value in the form field (to pass into widget for example).
-        defaults = {'max_length': self.max_length, 'widget': forms.Textarea}
+        defaults = {'max_length': self.max_length}
+        if not self.choices:
+            defaults['widget'] = forms.Textarea
         defaults.update(kwargs)
         return super().formfield(**defaults)
 

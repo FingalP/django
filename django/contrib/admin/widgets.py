@@ -4,10 +4,10 @@ Form Widget classes specific to the Django admin site.
 import copy
 
 from django import forms
+from django.conf import settings
 from django.db.models.deletion import CASCADE
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
-from django.utils.encoding import force_text
 from django.utils.html import smart_urlquote
 from django.utils.safestring import mark_safe
 from django.utils.text import Truncator
@@ -23,7 +23,14 @@ class FilteredSelectMultiple(forms.SelectMultiple):
     """
     @property
     def media(self):
-        js = ["core.js", "SelectBox.js", "SelectFilter2.js"]
+        extra = '' if settings.DEBUG else '.min'
+        js = [
+            'vendor/jquery/jquery%s.js' % extra,
+            'jquery.init.js',
+            'core.js',
+            'SelectBox.js',
+            'SelectFilter2.js',
+        ]
         return forms.Media(js=["admin/js/%s" % path for path in js])
 
     def __init__(self, verbose_name, is_stacked, attrs=None, choices=()):
@@ -31,7 +38,7 @@ class FilteredSelectMultiple(forms.SelectMultiple):
         self.is_stacked = is_stacked
         super().__init__(attrs, choices)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         context['widget']['attrs']['class'] = 'selectfilter'
         if self.is_stacked:
@@ -44,7 +51,13 @@ class FilteredSelectMultiple(forms.SelectMultiple):
 class AdminDateWidget(forms.DateInput):
     @property
     def media(self):
-        js = ["calendar.js", "admin/DateTimeShortcuts.js"]
+        extra = '' if settings.DEBUG else '.min'
+        js = [
+            'vendor/jquery/jquery%s.js' % extra,
+            'jquery.init.js',
+            'calendar.js',
+            'admin/DateTimeShortcuts.js',
+        ]
         return forms.Media(js=["admin/js/%s" % path for path in js])
 
     def __init__(self, attrs=None, format=None):
@@ -57,7 +70,13 @@ class AdminDateWidget(forms.DateInput):
 class AdminTimeWidget(forms.TimeInput):
     @property
     def media(self):
-        js = ["calendar.js", "admin/DateTimeShortcuts.js"]
+        extra = '' if settings.DEBUG else '.min'
+        js = [
+            'vendor/jquery/jquery%s.js' % extra,
+            'jquery.init.js',
+            'calendar.js',
+            'admin/DateTimeShortcuts.js',
+        ]
         return forms.Media(js=["admin/js/%s" % path for path in js])
 
     def __init__(self, attrs=None, format=None):
@@ -129,7 +148,7 @@ class ForeignKeyRawIdWidget(forms.TextInput):
         self.db = using
         super().__init__(attrs)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         rel_to = self.rel.model
         if rel_to in self.admin_site._registry:
@@ -196,7 +215,7 @@ class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
     """
     template_name = 'admin/widgets/many_to_many_raw_id.html'
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         context = super().get_context(name, value, attrs)
         if self.rel.model in self.admin_site._registry:
             # The related object is registered with the same AdminSite
@@ -215,7 +234,7 @@ class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
             return value.split(',')
 
     def format_value(self, value):
-        return ','.join(force_text(v) for v in value) if value else ''
+        return ','.join(str(v) for v in value) if value else ''
 
 
 class RelatedFieldWidgetWrapper(forms.Widget):
@@ -267,7 +286,7 @@ class RelatedFieldWidgetWrapper(forms.Widget):
         return reverse("admin:%s_%s_%s" % (info + (action,)),
                        current_app=self.admin_site.name, args=args)
 
-    def get_context(self, name, value, attrs=None):
+    def get_context(self, name, value, attrs):
         from django.contrib.admin.views.main import IS_POPUP_VAR, TO_FIELD_VAR
         rel_opts = self.rel.model._meta
         info = (rel_opts.app_label, rel_opts.model_name)
@@ -296,6 +315,9 @@ class RelatedFieldWidgetWrapper(forms.Widget):
 
     def value_from_datadict(self, data, files, name):
         return self.widget.value_from_datadict(data, files, name)
+
+    def value_omitted_from_data(self, data, files, name):
+        return self.widget.value_omitted_from_data(data, files, name)
 
     def id_for_label(self, id_):
         return self.widget.id_for_label(id_)
@@ -338,12 +360,8 @@ class AdminURLFieldWidget(forms.URLInput):
         context = super().get_context(name, value, attrs)
         context['current_label'] = _('Currently:')
         context['change_label'] = _('Change:')
-        context['widget']['href'] = smart_urlquote(context['widget']['value'])
+        context['widget']['href'] = smart_urlquote(context['widget']['value']) if value else ''
         return context
-
-    def format_value(self, value):
-        value = super().format_value(value)
-        return force_text(value)
 
 
 class AdminIntegerFieldWidget(forms.NumberInput):

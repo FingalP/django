@@ -46,7 +46,7 @@ class CommandTests(SimpleTestCase):
 
     def test_explode(self):
         """ An unknown command raises CommandError """
-        with self.assertRaises(CommandError):
+        with self.assertRaisesMessage(CommandError, "Unknown command: 'explode'"):
             management.call_command(('explode',))
 
     def test_system_exit(self):
@@ -175,6 +175,25 @@ class CommandTests(SimpleTestCase):
         finally:
             dance.Command.requires_migrations_checks = requires_migrations_checks
 
+    def test_call_command_unrecognized_option(self):
+        msg = (
+            'Unknown option(s) for dance command: unrecognized. Valid options '
+            'are: example, help, integer, no_color, opt_3, option3, '
+            'pythonpath, settings, skip_checks, stderr, stdout, style, '
+            'traceback, verbosity, version.'
+        )
+        with self.assertRaisesMessage(TypeError, msg):
+            management.call_command('dance', unrecognized=1)
+
+        msg = (
+            'Unknown option(s) for dance command: unrecognized, unrecognized2. '
+            'Valid options are: example, help, integer, no_color, opt_3, '
+            'option3, pythonpath, settings, skip_checks, stderr, stdout, '
+            'style, traceback, verbosity, version.'
+        )
+        with self.assertRaisesMessage(TypeError, msg):
+            management.call_command('dance', unrecognized=1, unrecognized2=1)
+
 
 class CommandRunTests(AdminScriptTestCase):
     """
@@ -196,5 +215,6 @@ class CommandRunTests(AdminScriptTestCase):
 class UtilsTests(SimpleTestCase):
 
     def test_no_existent_external_program(self):
-        with self.assertRaises(CommandError):
+        msg = 'Error executing a_42_command_that_doesnt_exist_42'
+        with self.assertRaisesMessage(CommandError, msg):
             popen_wrapper(['a_42_command_that_doesnt_exist_42'])

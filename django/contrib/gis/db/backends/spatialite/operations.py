@@ -1,12 +1,11 @@
 """
 SQL functions reference lists:
-https://web.archive.org/web/20130407175746/http://www.gaia-gis.it/gaia-sins/spatialite-sql-4.0.0.html
-http://www.gaia-gis.it/gaia-sins/spatialite-sql-4.2.1.html
+https://web.archive.org/web/20130407175746/https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.0.0.html
+https://www.gaia-gis.it/gaia-sins/spatialite-sql-4.2.1.html
 """
-import re
-
-from django.contrib.gis.db.backends.base.operations import \
-    BaseSpatialOperations
+from django.contrib.gis.db.backends.base.operations import (
+    BaseSpatialOperations,
+)
 from django.contrib.gis.db.backends.spatialite.adapter import SpatiaLiteAdapter
 from django.contrib.gis.db.backends.utils import SpatialOperator
 from django.contrib.gis.db.models import aggregates
@@ -15,61 +14,24 @@ from django.contrib.gis.measure import Distance
 from django.core.exceptions import ImproperlyConfigured
 from django.db.backends.sqlite3.operations import DatabaseOperations
 from django.utils.functional import cached_property
-
-
-class SpatiaLiteDistanceOperator(SpatialOperator):
-    def as_sql(self, connection, lookup, template_params, sql_params):
-        if lookup.lhs.output_field.geodetic(connection):
-            # SpatiaLite returns NULL instead of zero on geodetic coordinates
-            sql_template = 'COALESCE(%(func)s(%(lhs)s, %(rhs)s, %%s), 0) %(op)s %(value)s'
-            template_params.update({
-                'op': self.op,
-                'func': connection.ops.spatial_function_name('Distance'),
-            })
-            sql_params.insert(1, len(lookup.rhs) == 3 and lookup.rhs[-1] == 'spheroid')
-            return sql_template % template_params, sql_params
-        return super().as_sql(connection, lookup, template_params, sql_params)
+from django.utils.version import get_version_tuple
 
 
 class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
     name = 'spatialite'
     spatialite = True
-    version_regex = re.compile(r'^(?P<major>\d)\.(?P<minor1>\d)\.(?P<minor2>\d+)')
 
     Adapter = SpatiaLiteAdapter
 
-    area = 'Area'
-    centroid = 'Centroid'
     collect = 'Collect'
-    contained = 'MbrWithin'
-    difference = 'Difference'
-    distance = 'Distance'
-    envelope = 'Envelope'
     extent = 'Extent'
-    geojson = 'AsGeoJSON'
-    gml = 'AsGML'
-    intersection = 'Intersection'
-    kml = 'AsKML'
-    length = 'GLength'  # OpenGis defines Length, but this conflicts with an SQLite reserved keyword
     makeline = 'MakeLine'
-    num_geom = 'NumGeometries'
-    num_points = 'NumPoints'
-    point_on_surface = 'PointOnSurface'
-    scale = 'ScaleCoords'
-    svg = 'AsSVG'
-    sym_difference = 'SymDifference'
-    transform = 'Transform'
-    translate = 'ShiftCoords'
-    union = 'GUnion'  # OpenGis defines Union, but this conflicts with an SQLite reserved keyword
     unionagg = 'GUnion'
 
     from_text = 'GeomFromText'
-    from_wkb = 'GeomFromWKB'
     select = 'AsText(%s)'
 
     gis_operators = {
-        # Unary predicates
-        'isvalid': SpatialOperator(func='IsValid'),
         # Binary predicates
         'equals': SpatialOperator(func='Equals'),
         'disjoint': SpatialOperator(func='Disjoint'),
@@ -91,10 +53,6 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
         'exact': SpatialOperator(func='Equals'),
         # Distance predicates
         'dwithin': SpatialOperator(func='PtDistWithin'),
-        'distance_gt': SpatiaLiteDistanceOperator(func='Distance', op='>'),
-        'distance_gte': SpatiaLiteDistanceOperator(func='Distance', op='>='),
-        'distance_lt': SpatiaLiteDistanceOperator(func='Distance', op='<'),
-        'distance_lte': SpatiaLiteDistanceOperator(func='Distance', op='<='),
     }
 
     disallowed_aggregates = (aggregates.Extent3D,)
@@ -103,6 +61,8 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
     def function_names(self):
         return {
             'Length': 'ST_Length',
+            'LineLocatePoint': 'ST_Line_Locate_Point',
+            'NumPoints': 'ST_NPoints',
             'Reverse': 'ST_Reverse',
             'Scale': 'ScaleCoords',
             'Translate': 'ST_Translate',
@@ -113,7 +73,7 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
     def unsupported_functions(self):
         unsupported = {'BoundingCircle', 'ForceRHR', 'MemSize'}
         if not self.lwgeom_version():
-            unsupported |= {'GeoHash', 'IsValid', 'MakeValid'}
+            unsupported |= {'Azimuth', 'GeoHash', 'IsValid', 'MakeValid'}
         return unsupported
 
     @cached_property
@@ -132,13 +92,13 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
             raise ImproperlyConfigured('GeoDjango only supports SpatiaLite versions 4.0.0 and above.')
         return version
 
-    def convert_extent(self, box, srid):
+    def convert_extent(self, box):
         """
         Convert the polygon data received from SpatiaLite to min/max values.
         """
         if box is None:
             return None
-        shell = Geometry(box, srid).shell
+        shell = Geometry(box).shell
         xmin, ymin = shell[0][:2]
         xmax, ymax = shell[2][:2]
         return (xmin, ymin, xmax, ymax)
@@ -171,30 +131,6 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
         else:
             dist_param = value
         return [dist_param]
-
-    def get_geom_placeholder(self, f, value, compiler):
-        """
-        Provide a proper substitution value for Geometries that are not in the
-        SRID of the field.  Specifically, this routine will substitute in the
-        Transform() and GeomFromText() function call(s).
-        """
-        def transform_value(value, srid):
-            return not (value is None or value.srid == srid)
-        if hasattr(value, 'as_sql'):
-            if transform_value(value, f.srid):
-                placeholder = '%s(%%s, %s)' % (self.transform, f.srid)
-            else:
-                placeholder = '%s'
-            # No geometry value used for F expression, substitute in
-            # the column name instead.
-            sql, _ = compiler.compile(value)
-            return placeholder % sql
-        else:
-            if transform_value(value, f.srid):
-                # Adding Transform() to the SQL placeholder.
-                return '%s(%s(%%s,%s), %s)' % (self.transform, self.from_text, value.srid, f.srid)
-            else:
-                return '%s(%%s,%s)' % (self.from_text, f.srid)
 
     def _get_spatialite_func(self, func):
         """
@@ -232,16 +168,7 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
         minor, subminor).
         """
         version = self.spatialite_version()
-
-        m = self.version_regex.match(version)
-        if m:
-            major = int(m.group('major'))
-            minor1 = int(m.group('minor1'))
-            minor2 = int(m.group('minor2'))
-        else:
-            raise Exception('Could not parse SpatiaLite version string: %s' % version)
-
-        return (version, major, minor1, minor2)
+        return (version,) + get_version_tuple(version)
 
     def spatial_aggregate_name(self, agg_name):
         """
@@ -259,16 +186,3 @@ class SpatiaLiteOperations(BaseSpatialOperations, DatabaseOperations):
     def spatial_ref_sys(self):
         from django.contrib.gis.db.backends.spatialite.models import SpatialiteSpatialRefSys
         return SpatialiteSpatialRefSys
-
-    def get_db_converters(self, expression):
-        converters = super().get_db_converters(expression)
-        if hasattr(expression.output_field, 'geom_type'):
-            converters.append(self.convert_geometry)
-        return converters
-
-    def convert_geometry(self, value, expression, connection, context):
-        if value:
-            value = Geometry(value)
-            if 'transformed_srid' in context:
-                value.srid = context['transformed_srid']
-        return value

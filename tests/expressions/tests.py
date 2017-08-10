@@ -18,13 +18,12 @@ from django.db.models.functions import (
 )
 from django.db.models.sql import constants
 from django.db.models.sql.datastructures import Join
-from django.test import (
-    SimpleTestCase, TestCase, skipIfDBFeature, skipUnlessDBFeature,
-)
+from django.test import SimpleTestCase, TestCase, skipUnlessDBFeature
 from django.test.utils import Approximate
 
 from .models import (
-    UUID, Company, Employee, Experiment, Number, Result, SimulationRun, Time,
+    UUID, UUIDPK, Company, Employee, Experiment, Number, Result, SimulationRun,
+    Time,
 )
 
 
@@ -247,7 +246,8 @@ class BasicExpressionsTests(TestCase):
         )
 
         with transaction.atomic():
-            with self.assertRaises(FieldError):
+            msg = "Joined field references are not permitted in this query"
+            with self.assertRaisesMessage(FieldError, msg):
                 Company.objects.exclude(
                     ceo__firstname=F('point_of_contact__firstname')
                 ).update(name=F('point_of_contact__lastname'))
@@ -294,13 +294,15 @@ class BasicExpressionsTests(TestCase):
 
         def test():
             test_gmbh.point_of_contact = F("ceo")
-        with self.assertRaises(ValueError):
+        msg = 'F(ceo)": "Company.point_of_contact" must be a "Employee" instance.'
+        with self.assertRaisesMessage(ValueError, msg):
             test()
 
         test_gmbh.point_of_contact = test_gmbh.ceo
         test_gmbh.save()
         test_gmbh.name = F("ceo__last_name")
-        with self.assertRaises(FieldError):
+        msg = 'Joined field references are not permitted in this query'
+        with self.assertRaisesMessage(FieldError, msg):
             test_gmbh.save()
 
     def test_object_update_unsaved_objects(self):
@@ -338,12 +340,14 @@ class BasicExpressionsTests(TestCase):
         queryset = Employee.objects.filter(firstname__iexact=F('lastname'))
         self.assertQuerysetEqual(queryset, ["<Employee: Test test>"])
 
-    @skipIfDBFeature('has_case_insensitive_like')
     def test_ticket_16731_startswith_lookup(self):
         Employee.objects.create(firstname="John", lastname="Doe")
         e2 = Employee.objects.create(firstname="Jack", lastname="Jackson")
         e3 = Employee.objects.create(firstname="Jack", lastname="jackson")
-        self.assertSequenceEqual(Employee.objects.filter(lastname__startswith=F('firstname')), [e2])
+        self.assertSequenceEqual(
+            Employee.objects.filter(lastname__startswith=F('firstname')),
+            [e2, e3] if connection.features.has_case_insensitive_like else [e2]
+        )
         qs = Employee.objects.filter(lastname__istartswith=F('firstname')).order_by('pk')
         self.assertSequenceEqual(qs, [e2, e3])
 
@@ -479,6 +483,12 @@ class BasicExpressionsTests(TestCase):
         subquery_test2 = Company.objects.filter(pk=Subquery(small_companies.filter(num_employees=3)))
         self.assertCountEqual(subquery_test2, [self.foobar_ltd])
 
+    def test_uuid_pk_subquery(self):
+        u = UUIDPK.objects.create()
+        UUID.objects.create(uuid_fk=u)
+        qs = UUIDPK.objects.filter(id__in=Subquery(UUID.objects.values('uuid_fk__id')))
+        self.assertCountEqual(qs, [u])
+
     def test_nested_subquery(self):
         inner = Company.objects.filter(point_of_contact=OuterRef('pk'))
         outer = Employee.objects.annotate(is_point_of_contact=Exists(inner))
@@ -524,6 +534,16 @@ class BasicExpressionsTests(TestCase):
         # Another contrived example (there is no need to have a subquery here)
         outer = Company.objects.filter(pk__in=Subquery(inner.values('pk')))
         self.assertFalse(outer.exists())
+
+    def test_explicit_output_field(self):
+        class FuncA(Func):
+            output_field = models.CharField()
+
+        class FuncB(Func):
+            pass
+
+        expr = FuncB(FuncA())
+        self.assertEqual(expr.output_field, FuncA.output_field)
 
 
 class IterableLookupInnerExpressionsTests(TestCase):

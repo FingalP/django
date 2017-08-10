@@ -1,8 +1,10 @@
 from django.contrib.gis.db.backends.base.adapter import WKTAdapter
-from django.contrib.gis.db.backends.base.operations import \
-    BaseSpatialOperations
+from django.contrib.gis.db.backends.base.operations import (
+    BaseSpatialOperations,
+)
 from django.contrib.gis.db.backends.utils import SpatialOperator
 from django.contrib.gis.db.models import GeometryField, aggregates
+from django.contrib.gis.measure import Distance
 from django.db.backends.mysql.operations import DatabaseOperations
 from django.utils.functional import cached_property
 
@@ -33,10 +35,6 @@ class MySQLOperations(BaseSpatialOperations, DatabaseOperations):
     @cached_property
     def select(self):
         return self.geom_func_prefix + 'AsText(%s)'
-
-    @cached_property
-    def from_wkb(self):
-        return self.geom_func_prefix + 'GeomFromWKB'
 
     @cached_property
     def from_text(self):
@@ -72,11 +70,13 @@ class MySQLOperations(BaseSpatialOperations, DatabaseOperations):
     @cached_property
     def unsupported_functions(self):
         unsupported = {
-            'AsGeoJSON', 'AsGML', 'AsKML', 'AsSVG', 'BoundingCircle',
-            'ForceRHR', 'GeoHash', 'IsValid', 'MakeValid', 'MemSize',
-            'Perimeter', 'PointOnSurface', 'Reverse', 'Scale', 'SnapToGrid',
-            'Transform', 'Translate',
+            'AsGML', 'AsKML', 'AsSVG', 'Azimuth', 'BoundingCircle', 'ForceRHR',
+            'LineLocatePoint', 'MakeValid', 'MemSize', 'Perimeter',
+            'PointOnSurface', 'Reverse', 'Scale', 'SnapToGrid', 'Transform',
+            'Translate',
         }
+        if self.connection.mysql_version < (5, 7, 5):
+            unsupported.update({'AsGeoJSON', 'GeoHash', 'IsValid'})
         if self.is_mysql_5_5:
             unsupported.update({'Difference', 'Distance', 'Intersection', 'SymDifference', 'Union'})
         return unsupported
@@ -84,17 +84,18 @@ class MySQLOperations(BaseSpatialOperations, DatabaseOperations):
     def geo_db_type(self, f):
         return f.geom_type
 
-    def get_geom_placeholder(self, f, value, compiler):
-        """
-        The placeholder here has to include MySQL's WKT constructor.  Because
-        MySQL does not support spatial transformations, there is no need to
-        modify the placeholder based on the contents of the given value.
-        """
-        if hasattr(value, 'as_sql'):
-            placeholder, _ = compiler.compile(value)
+    def get_distance(self, f, value, lookup_type):
+        value = value[0]
+        if isinstance(value, Distance):
+            if f.geodetic(self.connection):
+                raise ValueError(
+                    'Only numeric values of degree units are allowed on '
+                    'geodetic distance queries.'
+                )
+            dist_param = getattr(value, Distance.unit_attname(f.units_name(self.connection)))
         else:
-            placeholder = '%s(%%s)' % self.from_text
-        return placeholder
+            dist_param = value
+        return [dist_param]
 
     def get_db_converters(self, expression):
         converters = super().get_db_converters(expression)
@@ -104,7 +105,7 @@ class MySQLOperations(BaseSpatialOperations, DatabaseOperations):
 
     # https://dev.mysql.com/doc/refman/en/spatial-function-argument-handling.html
     # MySQL 5.7.5 adds support for the empty geometry collections, but they are represented with invalid WKT.
-    def convert_invalid_empty_geometry_collection(self, value, expression, connection, context):
+    def convert_invalid_empty_geometry_collection(self, value, expression, connection):
         if value == b'GEOMETRYCOLLECTION()':
             return b'GEOMETRYCOLLECTION EMPTY'
         return value

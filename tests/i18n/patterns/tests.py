@@ -78,7 +78,8 @@ class URLPrefixTests(URLTestCaseBase):
 
     @override_settings(ROOT_URLCONF='i18n.patterns.urls.wrong')
     def test_invalid_prefix_use(self):
-        with self.assertRaises(ImproperlyConfigured):
+        msg = 'Using i18n_patterns in an included URLconf is not allowed.'
+        with self.assertRaisesMessage(ImproperlyConfigured, msg):
             reverse('account:register')
 
 
@@ -261,7 +262,7 @@ class URLRedirectWithoutTrailingSlashTests(URLTestCaseBase):
     def test_en_redirect(self):
         response = self.client.get('/account/register', HTTP_ACCEPT_LANGUAGE='en', follow=True)
         # We only want one redirect, bypassing CommonMiddleware
-        self.assertListEqual(response.redirect_chain, [('/en/account/register/', 302)])
+        self.assertEqual(response.redirect_chain, [('/en/account/register/', 302)])
         self.assertRedirects(response, '/en/account/register/', 302)
 
         response = self.client.get('/prefixed.xml', HTTP_ACCEPT_LANGUAGE='en', follow=True)

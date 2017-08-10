@@ -1,8 +1,8 @@
 from collections import defaultdict
+from contextlib import suppress
 
 from django.apps import apps
 from django.db import models
-from django.utils.encoding import force_text
 from django.utils.translation import gettext_lazy as _
 
 
@@ -39,10 +39,8 @@ class ContentTypeManager(models.Manager):
         for the same model don't hit the database.
         """
         opts = self._get_opts(model, for_concrete_model)
-        try:
+        with suppress(KeyError):
             return self._get_from_cache(opts)
-        except KeyError:
-            pass
 
         # The ContentType entry was not found in the cache, therefore we
         # proceed to load or create it.
@@ -151,7 +149,7 @@ class ContentType(models.Model):
         model = self.model_class()
         if not model:
             return self.model
-        return force_text(model._meta.verbose_name)
+        return str(model._meta.verbose_name)
 
     def model_class(self):
         """Return the model class for this type of content."""

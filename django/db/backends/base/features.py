@@ -36,8 +36,10 @@ class BaseDatabaseFeatures:
     has_select_for_update = False
     has_select_for_update_nowait = False
     has_select_for_update_skip_locked = False
-
-    supports_select_related = True
+    has_select_for_update_of = False
+    # Does the database's SELECT FOR UPDATE OF syntax require a column rather
+    # than a table?
+    select_for_update_of_column = False
 
     # Does the default test database allow multiple connections?
     # Usually an indication that the test database is in-memory
@@ -90,8 +92,8 @@ class BaseDatabaseFeatures:
     # Does the backend order NULL values as largest or smallest?
     nulls_order_largest = False
 
-    # Is there a 1000 item limit on query parameters?
-    supports_1000_query_parameters = True
+    # The database's limit on the number of query parameters.
+    max_query_params = None
 
     # Can an object have an autoincrement primary key of 0? MySQL says No.
     allows_auto_pk_0 = True
@@ -226,6 +228,17 @@ class BaseDatabaseFeatures:
     supports_select_intersection = True
     supports_select_difference = True
     supports_slicing_ordering_in_compound = False
+
+    # Does the backend support indexing a TextField?
+    supports_index_on_text_field = True
+
+    # Does the backend support CAST with precision?
+    supports_cast_with_precision = True
+
+    # SQL to create a procedure for use by the Django test suite. The
+    # functionality of the procedure isn't important.
+    create_test_procedure_without_params_sql = None
+    create_test_procedure_with_int_param_sql = None
 
     def __init__(self, connection):
         self.connection = connection

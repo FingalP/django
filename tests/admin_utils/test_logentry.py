@@ -56,7 +56,7 @@ class LogEntryTests(TestCase):
         logentry = LogEntry.objects.filter(content_type__model__iexact='article').latest('id')
         self.assertEqual(logentry.get_change_message(), 'Changed title and hist.')
         with translation.override('fr'):
-            self.assertEqual(logentry.get_change_message(), 'Title et hist modifié(s).')
+            self.assertEqual(logentry.get_change_message(), 'Modification de title et hist.')
 
         add_url = reverse('admin:admin_utils_article_add')
         post_data['title'] = 'New'
@@ -66,6 +66,11 @@ class LogEntryTests(TestCase):
         self.assertEqual(logentry.get_change_message(), 'Added.')
         with translation.override('fr'):
             self.assertEqual(logentry.get_change_message(), 'Ajout.')
+
+    def test_logentry_change_message_not_json(self):
+        """LogEntry.change_message was a string before Django 1.10."""
+        logentry = LogEntry(change_message='non-JSON string')
+        self.assertEqual(logentry.get_change_message(), logentry.change_message)
 
     @override_settings(USE_L10N=True)
     def test_logentry_change_message_localized_datetime_input(self):
@@ -120,22 +125,23 @@ class LogEntryTests(TestCase):
             json.loads(logentry.change_message),
             [
                 {"changed": {"fields": ["domain"]}},
-                {"added": {"object": "Article object", "name": "article"}},
-                {"changed": {"fields": ["title"], "object": "Article object", "name": "article"}},
-                {"deleted": {"object": "Article object", "name": "article"}},
+                {"added": {"object": "Added article", "name": "article"}},
+                {"changed": {"fields": ["title"], "object": "Changed Title", "name": "article"}},
+                {"deleted": {"object": "Title second article", "name": "article"}},
             ]
         )
         self.assertEqual(
             logentry.get_change_message(),
-            'Changed domain. Added article "Article object". '
-            'Changed title for article "Article object". Deleted article "Article object".'
+            'Changed domain. Added article "Added article". '
+            'Changed title for article "Changed Title". Deleted article "Title second article".'
         )
 
         with translation.override('fr'):
             self.assertEqual(
                 logentry.get_change_message(),
-                "Domain modifié(s). Article « Article object » ajouté. "
-                "Title modifié(s) pour l'objet article « Article object ». Article « Article object » supprimé."
+                "Modification de domain. Ajout de article « Added article ». "
+                "Modification de title pour l'objet article « Changed Title ». "
+                "Suppression de article « Title second article »."
             )
 
     def test_logentry_get_edited_object(self):
@@ -175,6 +181,10 @@ class LogEntryTests(TestCase):
         # Make sure custom action_flags works
         log_entry.action_flag = 4
         self.assertEqual(str(log_entry), 'LogEntry Object')
+
+    def test_logentry_repr(self):
+        logentry = LogEntry.objects.first()
+        self.assertEqual(repr(logentry), str(logentry.action_time))
 
     def test_log_action(self):
         content_type_pk = ContentType.objects.get_for_model(Article).pk

@@ -1,6 +1,7 @@
-class BaseSpatialOperations:
-    truncate_params = {}
+from django.contrib.gis.db.models.functions import Distance
 
+
+class BaseSpatialOperations:
     # Quick booleans for the type of this spatial backend, and
     # an attribute for the spatial database version tuple (if applicable)
     postgis = False
@@ -16,30 +17,6 @@ class BaseSpatialOperations:
     geography = False
     geometry = False
 
-    area = False
-    bounding_circle = False
-    centroid = False
-    difference = False
-    distance = False
-    distance_sphere = False
-    distance_spheroid = False
-    envelope = False
-    force_rhr = False
-    mem_size = False
-    num_geom = False
-    num_points = False
-    perimeter = False
-    perimeter3d = False
-    point_on_surface = False
-    polygonize = False
-    reverse = False
-    scale = False
-    snap_to_grid = False
-    sym_difference = False
-    transform = False
-    translate = False
-    union = False
-
     # Aggregates
     disallowed_aggregates = ()
 
@@ -51,24 +28,16 @@ class BaseSpatialOperations:
 
     # Blacklist/set of known unsupported functions of the backend
     unsupported_functions = {
-        'Area', 'AsGeoJSON', 'AsGML', 'AsKML', 'AsSVG',
+        'Area', 'AsGeoJSON', 'AsGML', 'AsKML', 'AsSVG', 'Azimuth',
         'BoundingCircle', 'Centroid', 'Difference', 'Distance', 'Envelope',
-        'ForceRHR', 'GeoHash', 'Intersection', 'IsValid', 'Length', 'MakeValid',
-        'MemSize', 'NumGeometries', 'NumPoints', 'Perimeter', 'PointOnSurface',
-        'Reverse', 'Scale', 'SnapToGrid', 'SymDifference', 'Transform',
-        'Translate', 'Union',
+        'ForceRHR', 'GeoHash', 'Intersection', 'IsValid', 'Length',
+        'LineLocatePoint', 'MakeValid', 'MemSize', 'NumGeometries',
+        'NumPoints', 'Perimeter', 'PointOnSurface', 'Reverse', 'Scale',
+        'SnapToGrid', 'SymDifference', 'Transform', 'Translate', 'Union',
     }
-
-    # Serialization
-    geohash = False
-    geojson = False
-    gml = False
-    kml = False
-    svg = False
 
     # Constructors
     from_text = False
-    from_wkb = False
 
     # Default conversion functions for aggregates; will be overridden if implemented
     # for the spatial backend.
@@ -104,7 +73,26 @@ class BaseSpatialOperations:
         stored procedure call to the transformation function of the spatial
         backend.
         """
-        raise NotImplementedError('subclasses of BaseSpatialOperations must provide a geo_db_placeholder() method')
+        def transform_value(value, field):
+            return value is not None and value.srid != field.srid
+
+        if hasattr(value, 'as_sql'):
+            return (
+                '%s(%%s, %s)' % (self.spatial_function_name('Transform'), f.srid)
+                if transform_value(value.output_field, f)
+                else '%s'
+            )
+        if transform_value(value, f):
+            # Add Transform() to the SQL placeholder.
+            return '%s(%s(%%s,%s), %s)' % (
+                self.spatial_function_name('Transform'),
+                self.from_text, value.srid, f.srid,
+            )
+        elif self.connection.features.has_spatialrefsys_table:
+            return '%s(%%s,%s)' % (self.from_text, f.srid)
+        else:
+            # For backwards compatibility on MySQL (#27464).
+            return '%s(%%s)' % self.from_text
 
     def check_expression_support(self, expression):
         if isinstance(expression, self.disallowed_aggregates):
@@ -127,3 +115,5 @@ class BaseSpatialOperations:
 
     def spatial_ref_sys(self):
         raise NotImplementedError('subclasses of BaseSpatialOperations must a provide spatial_ref_sys() method')
+
+    distance_expr_for_lookup = staticmethod(Distance)

@@ -17,6 +17,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     can_introspect_autofield = True
     can_introspect_binary_field = False
     can_introspect_small_integer_field = True
+    can_introspect_positive_integer_field = True
     supports_index_column_ordering = False
     supports_timezones = False
     requires_explicit_null_ordering_when_grouping = True
@@ -30,6 +31,22 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     supports_select_intersection = False
     supports_select_difference = False
     supports_slicing_ordering_in_compound = True
+    supports_index_on_text_field = False
+    has_case_insensitive_like = False
+    create_test_procedure_without_params_sql = """
+        CREATE PROCEDURE test_procedure ()
+        BEGIN
+            DECLARE V_I INTEGER;
+            SET V_I = 1;
+        END;
+    """
+    create_test_procedure_with_int_param_sql = """
+        CREATE PROCEDURE test_procedure (P_I INTEGER)
+        BEGIN
+            DECLARE V_I INTEGER;
+            SET V_I = P_I;
+        END;
+    """
 
     @cached_property
     def _mysql_storage_engine(self):

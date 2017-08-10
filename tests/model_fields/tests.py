@@ -1,3 +1,5 @@
+import pickle
+
 from django import forms
 from django.db import models
 from django.test import SimpleTestCase, TestCase
@@ -5,6 +7,11 @@ from django.test import SimpleTestCase, TestCase
 from .models import (
     Foo, RenamedField, VerboseNameField, Whiz, WhizIter, WhizIterEmpty,
 )
+
+
+class Nested:
+    class Field(models.Field):
+        pass
 
 
 class BasicFieldTests(TestCase):
@@ -31,6 +38,10 @@ class BasicFieldTests(TestCase):
         f = models.fields.CharField()
         self.assertEqual(repr(f), '<django.db.models.fields.CharField>')
 
+    def test_field_repr_nested(self):
+        """__repr__() uses __qualname__ for nested class support."""
+        self.assertEqual(repr(Nested.Field()), '<model_fields.tests.Nested.Field>')
+
     def test_field_name(self):
         """
         A defined field name (name="fieldname") is used instead of the model
@@ -54,6 +65,12 @@ class BasicFieldTests(TestCase):
         klass = forms.TypedMultipleChoiceField
         self.assertIsInstance(field.formfield(choices_form_class=klass), klass)
 
+    def test_formfield_disabled(self):
+        """Field.formfield() sets disabled for fields with choices."""
+        field = models.CharField(choices=[('a', 'b')])
+        form_field = field.formfield(disabled=True)
+        self.assertIs(form_field.disabled, True)
+
     def test_field_str(self):
         f = models.Field()
         self.assertEqual(str(f), '<django.db.models.fields.Field>')
@@ -69,6 +86,18 @@ class BasicFieldTests(TestCase):
         self.assertGreater(f3, f1)
         self.assertIsNotNone(f1)
         self.assertNotIn(f2, (None, 1, ''))
+
+    def test_field_instance_is_picklable(self):
+        """Field instances can be pickled."""
+        field = models.Field(max_length=100, default='a string')
+        # Must be picklable with this cached property populated (#28188).
+        field._get_default
+        pickle.dumps(field)
+
+    def test_deconstruct_nested_field(self):
+        """deconstruct() uses __qualname__ for nested class support."""
+        name, path, args, kwargs = Nested.Field().deconstruct()
+        self.assertEqual(path, 'model_fields.tests.Nested.Field')
 
 
 class ChoicesTests(SimpleTestCase):

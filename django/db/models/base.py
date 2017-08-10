@@ -204,7 +204,7 @@ class ModelBase(type):
             if base not in parents or not hasattr(base, '_meta'):
                 # Things without _meta aren't functional models, so they're
                 # uninteresting parents.
-                inherited_attributes |= set(base.__dict__.keys())
+                inherited_attributes.update(base.__dict__)
                 continue
 
             parent_fields = base._meta.local_fields + base._meta.local_many_to_many
@@ -293,6 +293,9 @@ class ModelBase(type):
                 else:
                     new_class.add_to_class(field.name, copy.deepcopy(field))
 
+        # Copy indexes so that index names are unique when models extend an
+        # abstract model.
+        new_class._meta.indexes = [copy.deepcopy(idx) for idx in new_class._meta.indexes]
         # Set the name of _meta.indexes. This can't be done in
         # Options.contribute_to_class() because fields haven't been added to
         # the model at that point.
@@ -478,46 +481,44 @@ class Model(metaclass=ModelBase):
                         del kwargs[prop]
                 except (AttributeError, FieldDoesNotExist):
                     pass
-            if kwargs:
-                raise TypeError("'%s' is an invalid keyword argument for this function" % list(kwargs)[0])
+            for kwarg in kwargs:
+                raise TypeError("'%s' is an invalid keyword argument for this function" % kwarg)
         super().__init__()
         post_init.send(sender=cls, instance=self)
 
     @classmethod
     def from_db(cls, db, field_names, values):
         if len(values) != len(cls._meta.concrete_fields):
-            values = list(values)
-            values.reverse()
-            values = [values.pop() if f.attname in field_names else DEFERRED for f in cls._meta.concrete_fields]
+            values_iter = iter(values)
+            values = [
+                next(values_iter) if f.attname in field_names else DEFERRED
+                for f in cls._meta.concrete_fields
+            ]
         new = cls(*values)
         new._state.adding = False
         new._state.db = db
         return new
 
     def __repr__(self):
-        try:
-            u = str(self)
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            u = '[Bad Unicode data]'
-        return '<%s: %s>' % (self.__class__.__name__, u)
+        return '<%s: %s>' % (self.__class__.__name__, self)
 
     def __str__(self):
-        return '%s object' % self.__class__.__name__
+        return '%s object (%s)' % (self.__class__.__name__, self.pk)
 
     def __eq__(self, other):
         if not isinstance(other, Model):
             return False
         if self._meta.concrete_model != other._meta.concrete_model:
             return False
-        my_pk = self._get_pk_val()
+        my_pk = self.pk
         if my_pk is None:
             return self is other
-        return my_pk == other._get_pk_val()
+        return my_pk == other.pk
 
     def __hash__(self):
-        if self._get_pk_val() is None:
+        if self.pk is None:
             raise TypeError("Model instances without primary key value are unhashable")
-        return hash(self._get_pk_val())
+        return hash(self.pk)
 
     def __reduce__(self):
         data = self.__dict__
@@ -865,7 +866,7 @@ class Model(metaclass=ModelBase):
 
     def delete(self, using=None, keep_parents=False):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert self._get_pk_val() is not None, (
+        assert self.pk is not None, (
             "%s object can't be deleted because its %s attribute is set to None." %
             (self._meta.object_name, self._meta.pk.attname)
         )
@@ -1138,7 +1139,7 @@ class Model(metaclass=ModelBase):
 
         # Run unique checks, but only for fields that passed validation.
         if validate_unique:
-            for name in errors.keys():
+            for name in errors:
                 if name != NON_FIELD_ERRORS and name not in exclude:
                     exclude.append(name)
             try:
@@ -1292,7 +1293,7 @@ class Model(metaclass=ModelBase):
     @classmethod
     def _check_id_field(cls):
         """Check if `id` field is a primary key."""
-        fields = list(f for f in cls._meta.local_fields if f.name == 'id' and f != cls._meta.pk)
+        fields = [f for f in cls._meta.local_fields if f.name == 'id' and f != cls._meta.pk]
         # fields is empty or consists of the invalid "id" field
         if fields and not fields[0].primary_key and cls._meta.pk.name == 'id':
             return [
@@ -1592,7 +1593,7 @@ class Model(metaclass=ModelBase):
         db_alias = None
 
         # Find the minimum max allowed length among all specified db_aliases.
-        for db in settings.DATABASES.keys():
+        for db in settings.DATABASES:
             # skip databases where the model won't be created
             if not router.allow_migrate_model(db, cls):
                 continue

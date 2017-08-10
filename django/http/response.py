@@ -3,6 +3,7 @@ import json
 import re
 import sys
 import time
+from contextlib import suppress
 from email.header import Header
 from http.client import responses
 from urllib.parse import urlparse
@@ -13,7 +14,7 @@ from django.core.exceptions import DisallowedRedirect
 from django.core.serializers.json import DjangoJSONEncoder
 from django.http.cookie import SimpleCookie
 from django.utils import timezone
-from django.utils.encoding import force_bytes, force_text, iri_to_uri
+from django.utils.encoding import force_bytes, iri_to_uri
 from django.utils.http import cookie_date
 
 _charset_from_content_type_re = re.compile(r';\s*charset=(?P<charset>[^\s;]+)', re.I)
@@ -92,7 +93,7 @@ class HttpResponseBase:
             return val if isinstance(val, bytes) else val.encode(encoding)
 
         headers = [
-            (b': '.join([to_bytes(key, 'ascii'), to_bytes(value, 'latin-1')]))
+            (to_bytes(key, 'ascii') + b': ' + to_bytes(value, 'latin-1'))
             for key, value in self._headers.values()
         ]
         return b'\r\n'.join(headers)
@@ -136,10 +137,8 @@ class HttpResponseBase:
         self._headers[header.lower()] = (header, value)
 
     def __delitem__(self, header):
-        try:
+        with suppress(KeyError):
             del self._headers[header.lower()]
-        except KeyError:
-            pass
 
     def __getitem__(self, header):
         return self._headers[header.lower()][1]
@@ -238,10 +237,8 @@ class HttpResponseBase:
     # See http://blog.dscpl.com.au/2012/10/obligations-for-calling-close-on.html
     def close(self):
         for closable in self._closable_objects:
-            try:
+            with suppress(Exception):
                 closable.close()
-            except Exception:
-                pass
         self.closed = True
         signals.request_finished.send(sender=self._handler_class)
 
@@ -307,10 +304,8 @@ class HttpResponse(HttpResponseBase):
         if hasattr(value, '__iter__') and not isinstance(value, (bytes, str)):
             content = b''.join(self.make_bytes(chunk) for chunk in value)
             if hasattr(value, 'close'):
-                try:
+                with suppress(Exception):
                     value.close()
-                except Exception:
-                    pass
         else:
             content = self.make_bytes(value)
         # Create a list of properly encoded bytestrings to support write().
@@ -405,7 +400,7 @@ class HttpResponseRedirectBase(HttpResponse):
     def __init__(self, redirect_to, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self['Location'] = iri_to_uri(redirect_to)
-        parsed = urlparse(force_text(redirect_to))
+        parsed = urlparse(str(redirect_to))
         if parsed.scheme and parsed.scheme not in self.allowed_schemes:
             raise DisallowedRedirect("Unsafe redirect to URL with protocol '%s'" % parsed.scheme)
 

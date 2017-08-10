@@ -239,6 +239,28 @@ class UserCreationFormTest(TestDataMixin, TestCase):
             '<ul><li>Your password can&#39;t be too similar to your other personal information.</li></ul>'
         )
 
+    @override_settings(AUTH_PASSWORD_VALIDATORS=[
+        {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    ])
+    def test_user_create_form_validates_password_with_all_data(self):
+        """UserCreationForm password validation uses all of the form's data."""
+        class CustomUserCreationForm(UserCreationForm):
+            class Meta(UserCreationForm.Meta):
+                model = User
+                fields = ('username', 'email', 'first_name', 'last_name')
+        form = CustomUserCreationForm({
+            'username': 'testuser',
+            'password1': 'testpassword',
+            'password2': 'testpassword',
+            'first_name': 'testpassword',
+            'last_name': 'lastname',
+        })
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            form.errors['password2'],
+            ['The password is too similar to the first name.'],
+        )
+
 
 # To verify that the login form rejects inactive users, use an authentication
 # backend that allows them.
@@ -824,6 +846,22 @@ class ReadOnlyPasswordHashTest(SimpleTestCase):
         widget = ReadOnlyPasswordHashWidget()
         html = widget.render(name='password', value=None, attrs={})
         self.assertIn(_("No password set."), html)
+
+    @override_settings(PASSWORD_HASHERS=['django.contrib.auth.hashers.PBKDF2PasswordHasher'])
+    def test_render(self):
+        widget = ReadOnlyPasswordHashWidget()
+        value = 'pbkdf2_sha256$100000$a6Pucb1qSFcD$WmCkn9Hqidj48NVe5x0FEM6A9YiOqQcl/83m2Z5udm0='
+        self.assertHTMLEqual(
+            widget.render('name', value, {'id': 'id_password'}),
+            """
+            <div id="id_password">
+                <strong>algorithm</strong>: pbkdf2_sha256
+                <strong>iterations</strong>: 100000
+                <strong>salt</strong>: a6Pucb******
+                <strong>hash</strong>: WmCkn9**************************************
+            </div>
+            """
+        )
 
     def test_readonly_field_has_changed(self):
         field = ReadOnlyPasswordHashField()

@@ -402,6 +402,31 @@ class FormsFormsetTestCase(SimpleTestCase):
         self.assertFalse(formset.is_valid())
         self.assertEqual(formset.non_form_errors(), ['Please submit 3 or more forms.'])
 
+    def test_formset_validate_min_unchanged_forms(self):
+        """
+        min_num validation doesn't consider unchanged forms with initial data
+        as "empty".
+        """
+        initial = [
+            {'choice': 'Zero', 'votes': 0},
+            {'choice': 'One', 'votes': 0},
+        ]
+        data = {
+            'choices-TOTAL_FORMS': '2',
+            'choices-INITIAL_FORMS': '2',
+            'choices-MIN_NUM_FORMS': '0',
+            'choices-MAX_NUM_FORMS': '2',
+            'choices-0-choice': 'Zero',
+            'choices-0-votes': '0',
+            'choices-1-choice': 'One',
+            'choices-1-votes': '1',  # changed from initial
+        }
+        ChoiceFormSet = formset_factory(Choice, min_num=2, validate_min=True)
+        formset = ChoiceFormSet(data, auto_id=False, prefix='choices', initial=initial)
+        self.assertFalse(formset.forms[0].has_changed())
+        self.assertTrue(formset.forms[1].has_changed())
+        self.assertTrue(formset.is_valid())
+
     def test_formset_validate_min_excludes_empty_forms(self):
         data = {
             'choices-TOTAL_FORMS': '2',
@@ -572,6 +597,7 @@ class FormsFormsetTestCase(SimpleTestCase):
              'form-MIN_NUM_FORMS': 0, 'form-MAX_NUM_FORMS': 1})
 
         self.assertTrue(p.is_valid())
+        self.assertEqual(p._errors, [])
         self.assertEqual(len(p.deleted_forms), 1)
 
     def test_formsets_with_ordering(self):
@@ -1312,7 +1338,8 @@ ArticleFormSet = formset_factory(ArticleForm)
 
 class TestIsBoundBehavior(SimpleTestCase):
     def test_no_data_raises_validation_error(self):
-        with self.assertRaises(ValidationError):
+        msg = 'ManagementForm data is missing or has been tampered with'
+        with self.assertRaisesMessage(ValidationError, msg):
             ArticleFormSet({}).is_valid()
 
     def test_with_management_data_attrs_work_fine(self):

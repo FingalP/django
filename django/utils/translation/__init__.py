@@ -3,10 +3,9 @@ Internationalization support.
 """
 import re
 import warnings
-from contextlib import ContextDecorator
+from contextlib import ContextDecorator, suppress
 
 from django.utils.deprecation import RemovedInDjango21Warning
-from django.utils.encoding import force_text
 from django.utils.functional import lazy
 
 __all__ = [
@@ -127,11 +126,9 @@ def lazy_number(func, resultclass, number=None, **kwargs):
                     number_value = rhs
                 kwargs['number'] = number_value
                 translated = func(**kwargs)
-                try:
+                # String may not contain a placeholder for the number.
+                with suppress(TypeError):
                     translated = translated % rhs
-                except TypeError:
-                    # String doesn't contain a placeholder for the number
-                    pass
                 return translated
 
         proxy = lazy(lambda **kwargs: NumberAwareString(), NumberAwareString)(**kwargs)
@@ -226,7 +223,7 @@ def _string_concat(*strings):
         'django.utils.translate.string_concat() is deprecated in '
         'favor of django.utils.text.format_lazy().',
         RemovedInDjango21Warning, stacklevel=2)
-    return ''.join(force_text(s) for s in strings)
+    return ''.join(str(s) for s in strings)
 
 
 string_concat = lazy(_string_concat, str)

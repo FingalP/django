@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 
 from django.conf import settings
 from django.contrib.admin.utils import quote
@@ -6,7 +7,6 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
-from django.utils.encoding import force_text
 from django.utils.text import get_text_list
 from django.utils.translation import gettext, gettext_lazy as _
 
@@ -24,7 +24,7 @@ class LogEntryManager(models.Manager):
         return self.model.objects.create(
             user_id=user_id,
             content_type_id=content_type_id,
-            object_id=force_text(object_id),
+            object_id=str(object_id),
             object_repr=object_repr[:200],
             action_flag=action_flag,
             change_message=change_message,
@@ -64,7 +64,7 @@ class LogEntry(models.Model):
         ordering = ('-action_time',)
 
     def __repr__(self):
-        return force_text(self.action_time)
+        return str(self.action_time)
 
     def __str__(self):
         if self.is_addition():
@@ -138,8 +138,6 @@ class LogEntry(models.Model):
         """
         if self.content_type and self.object_id:
             url_name = 'admin:%s_%s_change' % (self.content_type.app_label, self.content_type.model)
-            try:
+            with suppress(NoReverseMatch):
                 return reverse(url_name, args=(quote(self.object_id),))
-            except NoReverseMatch:
-                pass
         return None

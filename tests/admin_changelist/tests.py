@@ -186,7 +186,7 @@ class ChangeListTests(TestCase):
         link = reverse('admin:admin_changelist_child_change', args=(new_child.id,))
         row_html = (
             '<tbody><tr class="row1"><th class="field-name"><a href="%s">name</a></th>'
-            '<td class="field-parent nowrap">Parent object</td></tr></tbody>' % link
+            '<td class="field-parent nowrap">%s</td></tr></tbody>' % (link, new_parent)
         )
         self.assertNotEqual(table_output.find(row_html), -1, 'Failed to find expected row element: %s' % table_output)
 
@@ -413,6 +413,21 @@ class ChangeListTests(TestCase):
         cl = ChangeList(request, Concert, *get_changelist_args(m))
         # There's only one Concert instance
         self.assertEqual(cl.queryset.count(), 1)
+
+    def test_pk_in_search_fields(self):
+        band = Group.objects.create(name='The Hype')
+        Concert.objects.create(name='Woodstock', group=band)
+
+        m = ConcertAdmin(Concert, custom_site)
+        m.search_fields = ['group__pk']
+
+        request = self.factory.get('/concert/', data={SEARCH_VAR: band.pk})
+        cl = ChangeList(request, Concert, *get_changelist_args(m))
+        self.assertEqual(cl.queryset.count(), 1)
+
+        request = self.factory.get('/concert/', data={SEARCH_VAR: band.pk + 5})
+        cl = ChangeList(request, Concert, *get_changelist_args(m))
+        self.assertEqual(cl.queryset.count(), 0)
 
     def test_no_distinct_for_m2m_in_list_filter_without_params(self):
         """
@@ -797,11 +812,7 @@ class ChangeListTests(TestCase):
             cl.page_num = page_num
             cl.get_results(request)
             real_page_range = pagination(cl)['page_range']
-
-            self.assertListEqual(
-                expected_page_range,
-                list(real_page_range),
-            )
+            self.assertEqual(expected_page_range, list(real_page_range))
 
     def test_object_tools_displayed_no_add_permission(self):
         """

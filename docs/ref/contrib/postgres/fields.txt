@@ -278,7 +278,7 @@ A more useful index is a ``GIN`` index, which you should create using a
     similar to PostgreSQL's ``text`` type.
 
     .. _citext: https://www.postgresql.org/docs/current/static/citext.html
-    .. _the performance considerations: https://www.postgresql.org/docs/current/static/citext.html#AEN169274
+    .. _the performance considerations: https://www.postgresql.org/docs/current/static/citext.html#AEN178177
 
 ``HStoreField``
 ===============
@@ -517,7 +517,7 @@ using in conjunction with lookups on
     of the JSON which allows indexing. The trade-off is a small additional cost
     on writing to the ``jsonb`` field. ``JSONField`` uses ``jsonb``.
 
-    **As a result, this field requires PostgreSQL ≥ 9.4 and Psycopg2 ≥ 2.5.4**.
+    **As a result, this field requires PostgreSQL ≥ 9.4**.
 
 Querying ``JSONField``
 ----------------------
@@ -559,7 +559,7 @@ name::
 Multiple keys can be chained together to form a path lookup::
 
     >>> Dog.objects.filter(data__owner__name='Bob')
-    <QuerySet [<QuerySet <Dog: Rufus>]>
+    <QuerySet [<Dog: Rufus>]>
 
 If the key is an integer, it will be interpreted as an index lookup in an
 array::

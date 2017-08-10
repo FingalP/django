@@ -20,6 +20,7 @@ class NotRunningInTTYException(Exception):
 class Command(BaseCommand):
     help = 'Used to create a superuser.'
     requires_migrations_checks = True
+    stealth_options = ('stdin',)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -33,8 +34,7 @@ class Command(BaseCommand):
             help='Specifies the login for the superuser.',
         )
         parser.add_argument(
-            '--noinput', '--no-input',
-            action='store_false', dest='interactive', default=True,
+            '--noinput', '--no-input', action='store_false', dest='interactive',
             help=(
                 'Tells Django to NOT prompt the user for input of any kind. '
                 'You must use --%s with --noinput, along with an option for '

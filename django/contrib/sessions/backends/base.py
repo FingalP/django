@@ -1,6 +1,7 @@
 import base64
 import logging
 import string
+from contextlib import suppress
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -10,7 +11,7 @@ from django.utils import timezone
 from django.utils.crypto import (
     constant_time_compare, get_random_string, salted_hmac,
 )
-from django.utils.encoding import force_bytes, force_text
+from django.utils.encoding import force_bytes
 from django.utils.module_loading import import_string
 
 # session_key should not be case sensitive because some backends can store it
@@ -112,7 +113,7 @@ class SessionBase:
             # these happen, just return an empty dictionary (an empty session).
             if isinstance(e, SuspiciousOperation):
                 logger = logging.getLogger('django.security.%s' % e.__class__.__name__)
-                logger.warning(force_text(e))
+                logger.warning(str(e))
             return {}
 
     def update(self, dict_):
@@ -262,10 +263,8 @@ class SessionBase:
         """
         if value is None:
             # Remove any custom expiration for this session.
-            try:
+            with suppress(KeyError):
                 del self['_session_expiry']
-            except KeyError:
-                pass
             return
         if isinstance(value, timedelta):
             value = timezone.now() + value
@@ -295,10 +294,7 @@ class SessionBase:
         """
         Create a new session key, while retaining the current session data.
         """
-        try:
-            data = self._session_cache
-        except AttributeError:
-            data = {}
+        data = self._session
         key = self.session_key
         self.create()
         self._session_cache = data

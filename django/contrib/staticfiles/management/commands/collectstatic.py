@@ -1,5 +1,6 @@
 import os
 from collections import OrderedDict
+from contextlib import suppress
 
 from django.apps import apps
 from django.contrib.staticfiles.finders import get_finders
@@ -37,13 +38,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--noinput', '--no-input',
-            action='store_false', dest='interactive', default=True,
+            '--noinput', '--no-input', action='store_false', dest='interactive',
             help="Do NOT prompt the user for input of any kind.",
         )
         parser.add_argument(
-            '--no-post-process',
-            action='store_false', dest='post_process', default=True,
+            '--no-post-process', action='store_false', dest='post_process',
             help="Do NOT post process collected files.",
         )
         parser.add_argument(
@@ -53,24 +52,20 @@ class Command(BaseCommand):
                  "pattern. Use multiple times to ignore more.",
         )
         parser.add_argument(
-            '-n', '--dry-run',
-            action='store_true', dest='dry_run', default=False,
+            '-n', '--dry-run', action='store_true', dest='dry_run',
             help="Do everything except modify the filesystem.",
         )
         parser.add_argument(
-            '-c', '--clear',
-            action='store_true', dest='clear', default=False,
+            '-c', '--clear', action='store_true', dest='clear',
             help="Clear the existing files using the storage "
                  "before trying to copy or link the original file.",
         )
         parser.add_argument(
-            '-l', '--link',
-            action='store_true', dest='link', default=False,
+            '-l', '--link', action='store_true', dest='link',
             help="Create a symbolic link to each file instead of copying.",
         )
         parser.add_argument(
-            '--no-default-ignore', action='store_false',
-            dest='use_default_ignore_patterns', default=True,
+            '--no-default-ignore', action='store_false', dest='use_default_ignore_patterns',
             help="Don't ignore the common private glob-style patterns (defaults to 'CVS', '.*' and '*~').",
         )
 
@@ -318,10 +313,8 @@ class Command(BaseCommand):
         else:
             self.log("Linking '%s'" % source_path, level=1)
             full_path = self.storage.path(prefixed_path)
-            try:
+            with suppress(OSError):
                 os.makedirs(os.path.dirname(full_path))
-            except OSError:
-                pass
             try:
                 if os.path.lexists(full_path):
                     os.unlink(full_path)

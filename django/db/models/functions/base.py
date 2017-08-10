@@ -9,26 +9,12 @@ class Cast(Func):
     function = 'CAST'
     template = '%(function)s(%(expressions)s AS %(db_type)s)'
 
-    mysql_types = {
-        fields.CharField: 'char',
-        fields.IntegerField: 'signed integer',
-        fields.FloatField: 'signed',
-    }
-
     def __init__(self, expression, output_field):
         super().__init__(expression, output_field=output_field)
 
     def as_sql(self, compiler, connection, **extra_context):
-        if 'db_type' not in extra_context:
-            extra_context['db_type'] = self._output_field.db_type(connection)
+        extra_context['db_type'] = self.output_field.cast_db_type(connection)
         return super().as_sql(compiler, connection, **extra_context)
-
-    def as_mysql(self, compiler, connection):
-        extra_context = {}
-        output_field_class = type(self._output_field)
-        if output_field_class in self.mysql_types:
-            extra_context['db_type'] = self.mysql_types[output_field_class]
-        return self.as_sql(compiler, connection, **extra_context)
 
     def as_postgresql(self, compiler, connection):
         # CAST would be valid too, but the :: shortcut syntax is more readable.
@@ -132,7 +118,7 @@ class Greatest(Func):
 
     def as_sqlite(self, compiler, connection):
         """Use the MAX function on SQLite."""
-        return super().as_sql(compiler, connection, function='MAX')
+        return super().as_sqlite(compiler, connection, function='MAX')
 
 
 class Least(Func):
@@ -152,7 +138,7 @@ class Least(Func):
 
     def as_sqlite(self, compiler, connection):
         """Use the MIN function on SQLite."""
-        return super().as_sql(compiler, connection, function='MIN')
+        return super().as_sqlite(compiler, connection, function='MIN')
 
 
 class Length(Transform):
@@ -187,6 +173,26 @@ class Now(Func):
         return self.as_sql(compiler, connection, template='STATEMENT_TIMESTAMP()')
 
 
+class StrIndex(Func):
+    """
+    Return a positive integer corresponding to the 1-indexed position of the
+    first occurrence of a substring inside another string, or 0 if the
+    substring is not found.
+    """
+    function = 'INSTR'
+    arity = 2
+
+    def __init__(self, string, substring, **extra):
+        """
+        string: the name of a field, or an expression returning a string
+        substring: the name of a field, or an expression returning a string
+        """
+        super().__init__(string, substring, output_field=fields.IntegerField(), **extra)
+
+    def as_postgresql(self, compiler, connection):
+        return super().as_sql(compiler, connection, function='STRPOS')
+
+
 class Substr(Func):
     function = 'SUBSTRING'
 
@@ -199,11 +205,8 @@ class Substr(Func):
         if not hasattr(pos, 'resolve_expression'):
             if pos < 1:
                 raise ValueError("'pos' must be greater than 0")
-            pos = Value(pos)
         expressions = [expression, pos]
         if length is not None:
-            if not hasattr(length, 'resolve_expression'):
-                length = Value(length)
             expressions.append(length)
         super().__init__(*expressions, **extra)
 

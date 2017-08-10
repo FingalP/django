@@ -8,6 +8,7 @@ import socket
 import sys
 import tempfile
 import threading
+from contextlib import suppress
 from email import message_from_binary_file, message_from_bytes
 from email.header import Header
 from email.mime.text import MIMEText
@@ -374,6 +375,19 @@ class MailTests(HeadersCheckMixin, SimpleTestCase):
         self.assertEqual(payload[0].get_content_type(), 'multipart/alternative')
         self.assertEqual(payload[1].get_content_type(), 'application/pdf')
 
+    def test_attachments_two_tuple(self):
+        msg = EmailMessage(attachments=[('filename1', 'content1')])
+        filename, content, mimetype = self.get_decoded_attachments(msg)[0]
+        self.assertEqual(filename, 'filename1')
+        self.assertEqual(content, b'content1')
+        self.assertEqual(mimetype, 'application/octet-stream')
+
+    def test_attachments_MIMEText(self):
+        txt = MIMEText('content1')
+        msg = EmailMessage(attachments=[txt])
+        payload = msg.message().get_payload()
+        self.assertEqual(payload[0], txt)
+
     def test_non_ascii_attachment_filename(self):
         """Regression test for #14964"""
         headers = {"Date": "Fri, 09 Nov 2001 01:08:47 -0000", "Message-ID": "foo"}
@@ -401,6 +415,7 @@ class MailTests(HeadersCheckMixin, SimpleTestCase):
             ('file_png', None),
             ('file_txt.png', 'image/png'),
             ('file_png.txt', 'text/plain'),
+            ('file.eml', 'message/rfc822'),
         )
         test_mimetypes = ['text/plain', 'image/png', None]
 
@@ -1109,12 +1124,10 @@ class ConsoleBackendTests(BaseEmailBackendTests, SimpleTestCase):
 class FakeSMTPChannel(smtpd.SMTPChannel):
 
     def collect_incoming_data(self, data):
-        try:
+        # Ignore decode error in SSL/TLS connection tests as the test only
+        # cares whether the connection attempt was made.
+        with suppress(UnicodeDecodeError):
             smtpd.SMTPChannel.collect_incoming_data(self, data)
-        except UnicodeDecodeError:
-            # ignore decode error in SSL/TLS connection tests as we only care
-            # whether the connection attempt was made
-            pass
 
     def smtp_AUTH(self, arg):
         if arg == 'CRAM-MD5':

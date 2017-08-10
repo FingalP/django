@@ -4,14 +4,14 @@ from django.utils.encoding import force_bytes
 
 __all__ = ['Index']
 
-# The max length of the names of the indexes (restricted to 30 due to Oracle)
-MAX_NAME_LENGTH = 30
-
 
 class Index:
     suffix = 'idx'
+    # The max length of the name of the index (restricted to 30 for
+    # cross-database compatibility with Oracle)
+    max_name_length = 30
 
-    def __init__(self, fields=[], name=None):
+    def __init__(self, *, fields=[], name=None, db_tablespace=None):
         if not isinstance(fields, list):
             raise ValueError('Index.fields must be a list.')
         if not fields:
@@ -25,10 +25,11 @@ class Index:
         self.name = name or ''
         if self.name:
             errors = self.check_name()
-            if len(self.name) > MAX_NAME_LENGTH:
-                errors.append('Index names cannot be longer than %s characters.' % MAX_NAME_LENGTH)
+            if len(self.name) > self.max_name_length:
+                errors.append('Index names cannot be longer than %s characters.' % self.max_name_length)
             if errors:
                 raise ValueError(errors)
+        self.db_tablespace = db_tablespace
 
     def check_name(self):
         errors = []
@@ -42,26 +43,13 @@ class Index:
             self.name = 'D%s' % self.name[1:]
         return errors
 
-    def get_sql_create_template_values(self, model, schema_editor, using):
-        fields = [model._meta.get_field(field_name) for field_name, order in self.fields_orders]
-        tablespace_sql = schema_editor._get_index_tablespace_sql(model, fields)
-        quote_name = schema_editor.quote_name
-        columns = [
-            ('%s %s' % (quote_name(field.column), order)).strip()
-            for field, (field_name, order) in zip(fields, self.fields_orders)
-        ]
-        return {
-            'table': quote_name(model._meta.db_table),
-            'name': quote_name(self.name),
-            'columns': ', '.join(columns),
-            'using': using,
-            'extra': tablespace_sql,
-        }
-
     def create_sql(self, model, schema_editor, using=''):
-        sql_create_index = schema_editor.sql_create_index
-        sql_parameters = self.get_sql_create_template_values(model, schema_editor, using)
-        return sql_create_index % sql_parameters
+        fields = [model._meta.get_field(field_name) for field_name, _ in self.fields_orders]
+        col_suffixes = [order[1] for order in self.fields_orders]
+        return schema_editor._create_index_sql(
+            model, fields, name=self.name, using=using, db_tablespace=self.db_tablespace,
+            col_suffixes=col_suffixes,
+        )
 
     def remove_sql(self, model, schema_editor):
         quote_name = schema_editor.quote_name
@@ -73,7 +61,15 @@ class Index:
     def deconstruct(self):
         path = '%s.%s' % (self.__class__.__module__, self.__class__.__name__)
         path = path.replace('django.db.models.indexes', 'django.db.models')
-        return (path, (), {'fields': self.fields, 'name': self.name})
+        kwargs = {'fields': self.fields, 'name': self.name}
+        if self.db_tablespace is not None:
+            kwargs['db_tablespace'] = self.db_tablespace
+        return (path, (), kwargs)
+
+    def clone(self):
+        """Create a copy of this Index."""
+        path, args, kwargs = self.deconstruct()
+        return self.__class__(*args, **kwargs)
 
     @staticmethod
     def _hash_generator(*args):
@@ -100,13 +96,15 @@ class Index:
             (('-%s' if order else '%s') % column_name)
             for column_name, (field_name, order) in zip(column_names, self.fields_orders)
         ]
+        # The length of the parts of the name is based on the default max
+        # length of 30 characters.
         hash_data = [table_name] + column_names_with_order + [self.suffix]
         self.name = '%s_%s_%s' % (
             table_name[:11],
             column_names[0][:7],
             '%s_%s' % (self._hash_generator(*hash_data), self.suffix),
         )
-        assert len(self.name) <= 30, (
+        assert len(self.name) <= self.max_name_length, (
             'Index too long for multiple database support. Is self.suffix '
             'longer than 3 characters?'
         )

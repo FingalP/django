@@ -203,7 +203,7 @@ example database configuration::
             },
         },
         'diamonds': {
-             ... db settings
+            # ... db settings
             'TEST': {
                 'DEPENDENCIES': [],
             },
@@ -333,7 +333,7 @@ Let's take a look inside a couple of those files:
 .. snippet::
     :filename: runtests.py
 
-    #!/usr/bin/env python3
+    #!/usr/bin/env python
     import os
     import sys
 
@@ -740,5 +740,5 @@ listed here because of the ``source`` flag passed to the previous command.
 For more options like annotated HTML listings detailing missed lines, see the
 `coverage.py`_ docs.
 
-.. _coverage.py: http://nedbatchelder.com/code/coverage/
+.. _coverage.py: http://coverage.readthedocs.io/
 .. _install coverage.py: https://pypi.python.org/pypi/coverage
