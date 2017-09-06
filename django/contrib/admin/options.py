@@ -525,6 +525,7 @@ class ModelAdmin(BaseModelAdmin):
     # Custom templates (designed to be over-ridden in subclasses)
     add_form_template = None
     change_form_template = None
+    view_template = None
     change_list_template = None
     delete_confirmation_template = None
     delete_selected_confirmation_template = None
@@ -577,10 +578,12 @@ class ModelAdmin(BaseModelAdmin):
 
         urlpatterns = [
             url(r'^$', wrap(self.changelist_view), name='%s_%s_changelist' % info),
+            url(r'^view/$', wrap(self.viewlist_view), name='%s_%s_viewlist' % info),
             url(r'^add/$', wrap(self.add_view), name='%s_%s_add' % info),
             url(r'^(.+)/history/$', wrap(self.history_view), name='%s_%s_history' % info),
             url(r'^(.+)/delete/$', wrap(self.delete_view), name='%s_%s_delete' % info),
             url(r'^(.+)/change/$', wrap(self.change_view), name='%s_%s_change' % info),
+            url(r'^(.+)/view/$', wrap(self.viewonly_view), name='%s_%s_view' % info),
             # For backwards compatibility (was the change url before 1.9)
             url(r'^(.+)/$', wrap(RedirectView.as_view(
                 pattern_name='%s:%s_%s_change' % ((self.admin_site.name,) + info)
@@ -610,7 +613,7 @@ class ModelAdmin(BaseModelAdmin):
     def get_model_perms(self, request):
         """
         Return a dict of all perms for this model. This dict has the keys
-        ``add``, ``change``, and ``delete`` mapping to the True/False for each
+        ``view``, ``add``, ``change``, and ``delete`` mapping to the True/False for each
         of those actions.
         """
         return {
@@ -681,6 +684,13 @@ class ModelAdmin(BaseModelAdmin):
         """
         from django.contrib.admin.views.main import ChangeList
         return ChangeList
+
+    def get_viewlist(self, request, **kwargs):
+        """
+        Return the ViewList class for use on the viewlist page.
+        """
+        from django.contrib.admin.views.main import ViewList
+        return ViewList
 
     def get_object(self, request, object_id, from_field=None):
         """
@@ -1042,6 +1052,7 @@ class ModelAdmin(BaseModelAdmin):
             if inline.has_add_permission or inline.has_change_permission or inline.has_delete_permission:
                 has_editable_inline_admin_formsets = True
                 break
+
 
         context.update({
             'add': add,
@@ -1467,7 +1478,7 @@ class ModelAdmin(BaseModelAdmin):
         else:
             obj = self.get_object(request, unquote(object_id), to_field)
 
-            if not self.has_view_permission(request, obj) and not self.has_change_permission(request, obj):
+            if not self.has_change_permission(request, obj):
                 raise PermissionDenied
 
             if obj is None:
@@ -1507,15 +1518,11 @@ class ModelAdmin(BaseModelAdmin):
             else:
                 form = ModelForm(instance=obj)
                 formsets, inline_instances = self._create_formsets(request, obj, change=True)
-        if not add and not self.has_change_permission(request):
-            uneditable_fields = flatten_fieldsets(self.get_fieldsets(request, obj))
-        else:
-            uneditable_fields = self.get_readonly_fields(request, obj)
         adminForm = helpers.AdminForm(
             form,
             list(self.get_fieldsets(request, obj)),
             self.get_prepopulated_fields(request, obj),
-            uneditable_fields,
+            self.get_readonly_fields(request, obj),
             model_admin=self)
         media = self.media + adminForm.media
 
@@ -1556,6 +1563,88 @@ class ModelAdmin(BaseModelAdmin):
     def change_view(self, request, object_id, form_url='', extra_context=None):
         return self.changeform_view(request, object_id, form_url, extra_context)
 
+    def viewonly_view(self, request, object_id, form_url='', extra_context=None):
+
+        # The transaction shouldn't be necessary as this is viewonly, but I'm not sure about multiple database support so I left it in
+        with transaction.atomic(using=router.db_for_write(self.model)):
+            # Not sure what this is
+            to_field = request.POST.get(TO_FIELD_VAR, request.GET.get(TO_FIELD_VAR))
+            if to_field and not self.to_field_allowed(request, to_field):
+                raise DisallowedModelAdminToField("The field %s cannot be referenced." % to_field)
+
+            obj = self.get_object(request, unquote(object_id))
+            opts = self.opts
+
+            # validity and permission checks
+            if obj is None:
+                return self._get_obj_does_not_exist_redirect(request, opts, object_id)
+            if not self.has_view_permission(request, obj):
+                raise PermissionDenied
+
+            # build form similar to changeform, but with everything viewonly and no prepopulated_fields
+            ModelForm = self.get_form(request, obj)
+            form = ModelForm(instance=obj)
+            adminForm = helpers.AdminForm(form,
+                                         self.get_fieldsets(request, obj),
+                                         {},
+                                         flatten_fieldsets(self.get_fieldsets(request, obj)),
+                                         model_admin=self)
+            media = self.media + adminForm.media
+
+            view_on_site_url = self.get_view_on_site_url(obj)
+            formsets, inline_instances = self._create_formsets(request, obj, change=True)
+
+            # this prevents the page from populating the formsets with 3 extra forms and the option to add a new one
+            for formset in formsets:
+                formset.max_num = 0
+
+            inline_formsets = self.get_inline_formsets(request, formsets, inline_instances, obj)
+            for inline_formset in inline_formsets:
+                media = media + inline_formset.media
+                inline_formset.viewonly_fields = flatten_fieldsets(inline_formset.fieldsets)
+                inline_formset.formset.can_delete = False
+
+            context = dict(
+                # same as changeform_view and render_change_form context vars
+                self.admin_site.each_context(request),
+                is_popup = IS_POPUP_VAR in request.GET,
+                media=media,
+                preserved_filters = self.get_preserved_filters(request),
+                opts = opts,
+                original=obj,
+                has_absolute_url = view_on_site_url is not None,
+                absolute_url = view_on_site_url,
+                to_field_var = TO_FIELD_VAR,
+                is_popup_var = IS_POPUP_VAR,
+                has_change_permission = self.has_change_permission(request),
+                has_view_permission = self.has_view_permission(request),
+                has_add_permission = self.has_add_permission(request),
+                has_delete_permission = self.has_delete_permission(request),
+                save_as = self.save_as,
+
+                # changeform_view and render_change_form context vars which are different
+                title = (_('View %s') ) % opts.verbose_name,
+                adminform = adminForm,
+                inline_admin_formsets = inline_formsets,
+                errors = helpers.AdminErrorList(form, formsets),
+                add = False,
+                change = False,
+                has_editable_inline_admin_formsets = False,
+
+                # extra context vars to not show unnecessary buttons
+                show_save = False,
+                show_save_and_continue = False,
+                show_save_and_add_another = False,
+                show_delete_link = False,
+            )
+            context.update(extra_context or {})
+            form_template = self.view_template
+            return TemplateResponse(request, form_template or [
+                "admin/%s/%s/change_form.html" % (opts.app_label, opts.model_name),
+                "admin/%s/change_form.html" % opts.app_label,
+                "admin/change_form.html"
+            ], context)
+
     @csrf_protect_m
     def changelist_view(self, request, extra_context=None):
         """
@@ -1564,7 +1653,7 @@ class ModelAdmin(BaseModelAdmin):
         from django.contrib.admin.views.main import ERROR_FLAG
         opts = self.model._meta
         app_label = opts.app_label
-        if not self.has_view_permission(request, None) and not self.has_change_permission(request, None):
+        if not self.has_change_permission(request, None):
             raise PermissionDenied
 
         list_display = self.get_list_display(request)
@@ -1610,8 +1699,6 @@ class ModelAdmin(BaseModelAdmin):
         # Actions with no confirmation
         if (actions and request.method == 'POST' and
                 'index' in request.POST and '_save' not in request.POST):
-            if not self.has_change_permission(request, None):
-                raise PermissionDenied
             if selected:
                 response = self.response_action(request, queryset=cl.get_queryset(request))
                 if response:
@@ -1628,8 +1715,6 @@ class ModelAdmin(BaseModelAdmin):
         if (actions and request.method == 'POST' and
                 helpers.ACTION_CHECKBOX_NAME in request.POST and
                 'index' not in request.POST and '_save' not in request.POST):
-            if not self.has_change_permission(request, None):
-                raise PermissionDenied
             if selected:
                 response = self.response_action(request, queryset=cl.get_queryset(request))
                 if response:
@@ -1650,8 +1735,6 @@ class ModelAdmin(BaseModelAdmin):
 
         # Handle POSTed bulk-edit data.
         if request.method == 'POST' and cl.list_editable and '_save' in request.POST:
-            if not self.has_change_permission(request, None):
-                raise PermissionDenied
             FormSet = self.get_changelist_formset(request)
             formset = cl.formset = FormSet(request.POST, request.FILES, queryset=self.get_queryset(request))
             if formset.is_valid():
@@ -1679,7 +1762,7 @@ class ModelAdmin(BaseModelAdmin):
                 return HttpResponseRedirect(request.get_full_path())
 
         # Handle GET -- construct a formset for display.
-        elif cl.list_editable and self.has_change_permission(request):
+        elif cl.list_editable:
             FormSet = self.get_changelist_formset(request)
             formset = cl.formset = FormSet(queryset=cl.result_list)
 
@@ -1725,6 +1808,30 @@ class ModelAdmin(BaseModelAdmin):
 
         request.current_app = self.admin_site.name
 
+        return TemplateResponse(request, self.change_list_template or [
+            'admin/%s/%s/change_list.html' % (app_label, opts.model_name),
+            'admin/%s/change_list.html' % app_label,
+            'admin/change_list.html'
+        ], context)
+
+    def viewlist_view(self, request, extra_context=None):
+        opts = self.model._meta
+        app_label = opts.app_label
+        list_display = self.get_list_display(request)
+        list_display_links = self.get_list_display_links(request, list_display)
+        list_filter = self.get_list_filter(request)
+        search_fields = self.get_search_fields(request)
+        list_select_related = self.get_list_select_related(request)
+        cl = self.get_viewlist(request)(
+            request, self.model, list_display,
+            list_display_links, list_filter, self.date_hierarchy,
+            search_fields, list_select_related, self.list_per_page,
+            self.list_max_show_all, self.list_editable, self,
+        )
+        cl.formset = None
+        context = dict(cl = cl,
+            title=cl.title,
+            )
         return TemplateResponse(request, self.change_list_template or [
             'admin/%s/%s/change_list.html' % (app_label, opts.model_name),
             'admin/%s/change_list.html' % app_label,

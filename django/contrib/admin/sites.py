@@ -427,10 +427,13 @@ class AdminSite:
                 'object_name': model._meta.object_name,
                 'perms': perms,
             }
-            if perms.get('change') or perms.get('view'):
+            if perms.get('change'):
                 model_dict['view_only'] = not perms.get('change')
                 with suppress(NoReverseMatch):
                     model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
+            if perms.get('view'):
+                with suppress(NoReverseMatch):
+                    model_dict['admin_view_url'] = reverse('admin:%s_%s_viewlist' % info, current_app=self.name)
             if perms.get('add'):
                 with suppress(NoReverseMatch):
                     model_dict['add_url'] = reverse('admin:%s_%s_add' % info, current_app=self.name)
