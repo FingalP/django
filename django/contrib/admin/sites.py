@@ -428,7 +428,6 @@ class AdminSite:
                 'perms': perms,
             }
             if perms.get('change'):
-                model_dict['view_only'] = not perms.get('change')
                 with suppress(NoReverseMatch):
                     model_dict['admin_url'] = reverse('admin:%s_%s_changelist' % info, current_app=self.name)
             if perms.get('view'):

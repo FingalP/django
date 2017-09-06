@@ -640,10 +640,6 @@ class ModelAdmin(BaseModelAdmin):
         readonly_fields = self.get_readonly_fields(request, obj)
         exclude.extend(readonly_fields)
 
-        # If it is a change form and the user has no permission, we exlcude all the fields
-        if change and hasattr(request, 'user') and not self.has_change_permission(request, obj):
-            exclude.extend(fields)
-
         if excluded is None and hasattr(self.form, '_meta') and self.form._meta.exclude:
             # Take the custom ModelForm's Meta.exclude into account only if the
             # ModelAdmin doesn't define its own.
@@ -807,10 +803,6 @@ class ModelAdmin(BaseModelAdmin):
         # If self.actions is explicitly set to None that means that we don't
         # want *any* actions enabled on this page.
         if self.actions is None or IS_POPUP_VAR in request.GET:
-            return OrderedDict()
-
-        # Also user has to have change permisson
-        if not self.has_change_permission(request, None):
             return OrderedDict()
 
         actions = []
@@ -1484,7 +1476,7 @@ class ModelAdmin(BaseModelAdmin):
             if obj is None:
                 return self._get_obj_does_not_exist_redirect(request, opts, object_id)
 
-        ModelForm = self.get_form(request, obj, change=not add)
+        ModelForm = self.get_form(request, obj)
         if request.method == 'POST':
             form = ModelForm(request.POST, request.FILES, instance=obj)
             if form.is_valid():
